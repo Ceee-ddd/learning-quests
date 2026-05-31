@@ -455,13 +455,6 @@ export default function Play() {
             <ScanLine className="w-5 h-5" /> Scan Compartment 1 QR
           </button>
 
-          {/* Teacher bypass */}
-          <button
-            onClick={() => setGamePhase("playing")}
-            className="btn-outline flex items-center justify-center gap-2"
-          >
-            <BookOpen className="w-4 h-4" /> Skip Scan (Teacher use only)
-          </button>
         </div>
 
         {showScanner && <QRScanner onResult={handleScan} onClose={() => setShowScanner(false)} />}
@@ -636,10 +629,6 @@ export default function Play() {
           )}
         </div>
 
-        {/* Teacher bypass for demo */}
-        <button onClick={advanceLevel} className="btn-outline flex items-center justify-center gap-2">
-          <BookOpen className="w-4 h-4" /> Next (Teacher use only)
-        </button>
       </div>
 
       {showScanner && <QRScanner onResult={handleScan} onClose={() => setShowScanner(false)} />}

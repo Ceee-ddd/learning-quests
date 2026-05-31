@@ -87,6 +87,7 @@ export default function TeacherSession() {
   const [session, setSession] = useState<any>(null);
   const [challenges, setChallenges] = useState<any[]>([]);
   const [joinQrExpanded, setJoinQrExpanded] = useState(true);
+  const [unlockQrExpanded, setUnlockQrExpanded] = useState(false);
   // activePage: -1 = Story page, 0+ = compartment index into challenges array
   const [activePage, setActivePage] = useState(-1);
   const [saving, setSaving] = useState(false);
@@ -317,32 +318,50 @@ export default function TeacherSession() {
 
         {/* ── Compartment Unlock QRs ── */}
         <div className="app-card space-y-3">
-          <div className="font-bold text-primary">Compartment Unlock QRs</div>
-          <p className="text-xs text-muted-foreground">
-            Print and place inside each physical compartment. Works for all groups — each student's device is recognised automatically when they scan.
-          </p>
-          {unlockLevels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">Add at least 1 compartment to generate unlock QRs.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {unlockLevels.map((n) => {
-                const canvasId = `unlock-qr-${n}`;
-                const qrUrl = `${window.location.origin}/session/${sessionId}/scan?from=${n}`;
-                return (
-                  <div key={n} className="bg-background rounded-xl p-3 text-center space-y-1.5 border border-border">
-                    <div className="text-xs font-semibold text-primary">Compartment {n}</div>
-                    <div className="bg-white p-1.5 rounded-lg inline-block">
-                      <QRCodeCanvas id={canvasId} value={qrUrl} size={88} includeMargin />
-                    </div>
-                    <button
-                      onClick={() => downloadQr(canvasId, `compartment-${n}-unlock.png`)}
-                      className="text-[10px] text-action font-semibold flex items-center justify-center gap-1 mx-auto"
-                    >
-                      <Download className="w-3 h-3" /> Save
-                    </button>
-                  </div>
-                );
-              })}
+          <button
+            onClick={() => setUnlockQrExpanded((v) => !v)}
+            className="w-full flex items-center justify-between"
+          >
+            <div className="text-left">
+              <div className="font-bold text-primary text-base">Compartment Unlock QRs</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Print and place inside each physical compartment
+              </div>
+            </div>
+            {unlockQrExpanded
+              ? <ChevronUp className="w-5 h-5 text-muted-foreground" />
+              : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+          </button>
+
+          {unlockQrExpanded && (
+            <div className="space-y-3 animate-pop-in">
+              <p className="text-xs text-muted-foreground">
+                Works for all groups — each student's device is recognised automatically when they scan.
+              </p>
+              {unlockLevels.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">Add at least 1 compartment to generate unlock QRs.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {unlockLevels.map((n) => {
+                    const canvasId = `unlock-qr-${n}`;
+                    const qrUrl = `${window.location.origin}/session/${sessionId}/scan?from=${n}`;
+                    return (
+                      <div key={n} className="bg-background rounded-xl p-3 text-center space-y-1.5 border border-border">
+                        <div className="text-xs font-semibold text-primary">Compartment {n}</div>
+                        <div className="bg-white p-1.5 rounded-lg inline-block">
+                          <QRCodeCanvas id={canvasId} value={qrUrl} size={88} includeMargin />
+                        </div>
+                        <button
+                          onClick={() => downloadQr(canvasId, `compartment-${n}-unlock.png`)}
+                          className="text-[10px] text-action font-semibold flex items-center justify-center gap-1 mx-auto"
+                        >
+                          <Download className="w-3 h-3" /> Save
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
