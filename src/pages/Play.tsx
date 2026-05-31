@@ -411,9 +411,11 @@ export default function Play() {
         return;
       }
 
-      // Normal playing phase: scanning the QR inside the current compartment advances to next level
-      if (fromLevel !== currentLevel) {
-        toast.error(`Wrong compartment — you're on Compartment ${currentLevel}, not ${fromLevel}.`);
+      // Normal playing phase: after answering correctly, student scans the NEXT compartment's QR
+      // to physically open it and advance. So we expect from = currentLevel + 1.
+      const expectedLevel = currentLevel + 1;
+      if (fromLevel !== expectedLevel) {
+        toast.error(`Wrong QR — scan the QR inside Compartment ${expectedLevel} to continue.`);
         return;
       }
       advanceLevel();
