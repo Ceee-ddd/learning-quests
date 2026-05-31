@@ -21,6 +21,10 @@ export default function Play() {
   const [challenges, setChallenges] = useState<any[]>([]);
   const [answer, setAnswer] = useState("");
   const [chosenOption, setChosenOption] = useState<string>("");
+  // For multi-question multiple choice: map of questionIndex -> chosen letter
+  const [mcAnswers, setMcAnswers] = useState<Record<number, string>>({});
+  // For multi-question short_answer/long_text: map of questionIndex -> typed answer
+  const [saAnswers, setSaAnswers] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
@@ -174,6 +178,8 @@ export default function Play() {
   useEffect(() => {
     setAnswer("");
     setChosenOption("");
+    setMcAnswers({});
+    setSaAnswers({});
     setSuccess(false);
     setStrikes(0);
     setCooldownTier(0);
@@ -246,6 +252,11 @@ export default function Play() {
   const cooldownLeft = Math.max(0, Math.ceil((cooldownUntil - now) / 1000));
   const onCooldown = cooldownLeft > 0;
 
+  // Detect whether options is the new multi-question format or legacy flat choices
+  function isMQFormat(opts: any[]): boolean {
+    return opts.length > 0 && typeof opts[0] === "object" && "choices" in opts[0];
+  }
+
   function validate(input: string): boolean {
     const c = challenge;
     const ans = input.trim().toLowerCase();
@@ -253,11 +264,33 @@ export default function Play() {
       return ans === (c.correct_answer_code || "").trim().toLowerCase();
     }
     if (c.type === "multiple_choice") {
-      const opt = (c.options as any[])?.find((o) => o.label.startsWith(input));
+      const opts = (c.options as any[]) || [];
+      if (isMQFormat(opts)) {
+        // Multi-question: all questions must be answered correctly
+        return opts.every((q: any, qi: number) => {
+          const chosen = mcAnswers[qi];
+          if (!chosen) return false;
+          const match = (q.choices as any[])?.find((ch: any) => ch.label.startsWith(chosen));
+          return !!match?.is_correct;
+        });
+      }
+      // Legacy single-question flat format
+      const opt = opts.find((o: any) => o.label.startsWith(input));
       return !!opt?.is_correct;
     }
     if (c.type === "short_answer" || c.type === "long_text") {
-      const kws: string[] = (c.keywords as string[]) || [];
+      const raw: any = c.keywords || [];
+      const isSAMultiQ = raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0];
+      if (isSAMultiQ) {
+        // Every sub-question answer must hit at least one of its keywords
+        return (raw as { text: string; keywords: string[] }[]).every((q, qi) => {
+          const ans_i = (saAnswers[qi] || "").trim().toLowerCase();
+          if (q.keywords.length === 0) return ans_i.length > 5;
+          return q.keywords.some((k: string) => ans_i.includes(k.toLowerCase()));
+        });
+      }
+      // Legacy single-question
+      const kws: string[] = (raw as string[]);
       if (kws.length === 0) return ans.length > 5;
       return kws.some((k) => ans.includes(k.toLowerCase()));
     }
@@ -267,14 +300,27 @@ export default function Play() {
   async function submit() {
     if (sessionStatus !== "active") return toast.error("The session has ended.");
     if (onCooldown) return;
-    const input = challenge.type === "multiple_choice" ? chosenOption : answer;
-    if (!input.trim()) return toast.error("Enter an answer first");
+    const opts = (challenge.options as any[]) || [];
+    const isMultiQ = challenge.type === "multiple_choice" && isMQFormat(opts);
+    const rawKw: any = challenge.keywords || [];
+    const isSAMultiQ = (challenge.type === "short_answer" || challenge.type === "long_text")
+      && rawKw.length > 0 && typeof rawKw[0] === "object" && "text" in rawKw[0];
+    if (isMultiQ) {
+      const unanswered = opts.findIndex((_: any, qi: number) => !mcAnswers[qi]);
+      if (unanswered !== -1) return toast.error(`Please answer Question ${unanswered + 1} first.`);
+    }
+    if (isSAMultiQ) {
+      const unanswered = (rawKw as any[]).findIndex((_: any, qi: number) => !(saAnswers[qi] || "").trim());
+      if (unanswered !== -1) return toast.error(`Please answer Question ${unanswered + 1} first.`);
+    }
+    const input = isMultiQ ? "" : isSAMultiQ ? "" : challenge.type === "multiple_choice" ? chosenOption : answer;
+    if (!isMultiQ && !isSAMultiQ && !input.trim()) return toast.error("Enter an answer first");
 
     setBusy(true);
     const ok = validate(input);
     await supabase.from("submissions").insert({
       group_id: groupId!, challenge_level: currentLevel,
-      submitted_answer: input, is_correct: ok,
+      submitted_answer: isMultiQ ? JSON.stringify(mcAnswers) : isSAMultiQ ? JSON.stringify(saAnswers) : input, is_correct: ok,
     });
 
     if (!group.start_time) {
@@ -370,34 +416,94 @@ export default function Play() {
 
           {!success && (
             <>
-              {challenge.type === "multiple_choice" ? (
-                <div className="space-y-2">
-                  {(challenge.options as any[]).map((o: any) => {
-                    const letter = o.label.charAt(0);
-                    const sel = chosenOption === letter;
-                    return (
-                      <button
-                        key={o.label}
-                        type="button"
-                        onClick={() => setChosenOption(letter)}
-                        className={`w-full text-left rounded-xl px-4 py-3 border-2 transition ${
-                          sel ? "border-action bg-action/10" : "border-border bg-card"
-                        }`}
-                      >
-                        <span className="font-semibold text-primary">{o.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : challenge.type === "long_text" || challenge.type === "short_answer" ? (
-                <textarea
-                  className="field-input min-h-[100px]"
-                  placeholder="Write your answer..."
-                  value={answer}
-                  maxLength={1000}
-                  onChange={(e) => setAnswer(e.target.value)}
-                />
-              ) : (
+              {challenge.type === "multiple_choice" ? (() => {
+                const opts = (challenge.options as any[]) || [];
+                const multiQ = isMQFormat(opts);
+                if (multiQ) {
+                  // Multi-question render
+                  return (
+                    <div className="space-y-4">
+                      {opts.map((q: any, qi: number) => (
+                        <div key={qi} className="space-y-2">
+                          <p className="text-sm font-semibold text-foreground/90">
+                            {qi + 1}. {q.text}
+                          </p>
+                          <div className="space-y-1.5">
+                            {(q.choices as any[]).map((ch: any) => {
+                              const letter = ch.label.charAt(0);
+                              const sel = mcAnswers[qi] === letter;
+                              return (
+                                <button
+                                  key={ch.label}
+                                  type="button"
+                                  onClick={() => setMcAnswers((prev) => ({ ...prev, [qi]: letter }))}
+                                  className={`w-full text-left rounded-xl px-4 py-2.5 border-2 transition ${
+                                    sel ? "border-action bg-action/10" : "border-border bg-card"
+                                  }`}
+                                >
+                                  <span className="font-semibold text-primary">{ch.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                // Legacy single-question flat format
+                return (
+                  <div className="space-y-2">
+                    {opts.map((o: any) => {
+                      const letter = o.label.charAt(0);
+                      const sel = chosenOption === letter;
+                      return (
+                        <button
+                          key={o.label}
+                          type="button"
+                          onClick={() => setChosenOption(letter)}
+                          className={`w-full text-left rounded-xl px-4 py-3 border-2 transition ${
+                            sel ? "border-action bg-action/10" : "border-border bg-card"
+                          }`}
+                        >
+                          <span className="font-semibold text-primary">{o.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })() : challenge.type === "long_text" || challenge.type === "short_answer" ? (() => {
+                const rawKw: any = challenge.keywords || [];
+                const isSAMultiQ = rawKw.length > 0 && typeof rawKw[0] === "object" && "text" in rawKw[0];
+                if (isSAMultiQ) {
+                  return (
+                    <div className="space-y-4">
+                      {(rawKw as { text: string; keywords: string[] }[]).map((q, qi) => (
+                        <div key={qi} className="space-y-1.5">
+                          <p className="text-sm font-semibold text-foreground/90">{qi + 1}. {q.text}</p>
+                          <textarea
+                            className="field-input min-h-[80px]"
+                            placeholder="Write your answer..."
+                            value={saAnswers[qi] || ""}
+                            maxLength={1000}
+                            onChange={(e) => setSaAnswers((prev) => ({ ...prev, [qi]: e.target.value }))}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                // Legacy single question
+                return (
+                  <textarea
+                    className="field-input min-h-[100px]"
+                    placeholder="Write your answer..."
+                    value={answer}
+                    maxLength={1000}
+                    onChange={(e) => setAnswer(e.target.value)}
+                  />
+                );
+              })() : (
                 <input
                   className="field-input"
                   placeholder={challenge.type === "sequence" ? "Enter 4-digit code" : "Your answer"}
