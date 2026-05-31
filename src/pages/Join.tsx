@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "@/components/AppHeader";
 import { InfoBox } from "@/components/InfoBox";
-import { Users, AlertTriangle, Plus, X, Clock, Trash2 } from "lucide-react";
+import { Users, AlertTriangle, Plus, X, Clock, Trash2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
 type Phase = "register" | "waiting";
@@ -20,6 +20,7 @@ export default function Join() {
   const [groupName, setGroupName] = useState("");
   const [password, setPassword] = useState("");
   const [members, setMembers] = useState<string[]>([""]);
+  const [showPassword, setShowPassword] = useState(false);
   const [pendingMemberAction, setPendingMemberAction] = useState<{
     type: "add" | "remove";
     index?: number;
@@ -335,17 +336,37 @@ export default function Join() {
             </label>
 
             <label className="block">
-              <span className="text-sm font-semibold text-primary">Group Password <span className="text-destructive">(required)</span></span>
-              <input
-                type="password"
-                className="field-input mt-1"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Required password for reconnecting"
-                maxLength={32}
-              />
+              <span className="text-sm font-semibold text-primary">
+                Group Password <span className="text-destructive">(required)</span>
+              </span>
+
+              <div className="relative mt-1">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="field-input pr-12"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Required password for reconnecting"
+                  maxLength={32}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
+
               <p className="text-xs text-muted-foreground mt-1">
-                This password is required and visible to the teacher along with your group name and members.
+                This password is required and visible to the teacher along with your group
+                name and members.
               </p>
             </label>
 
