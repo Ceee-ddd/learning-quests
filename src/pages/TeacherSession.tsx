@@ -145,17 +145,6 @@ export default function TeacherSession() {
     }
   }
 
-  // If a non-last compartment has type "final_riddle", reset it to "sequence"
-  useEffect(() => {
-    if (challenges.length < 2) return;
-    const nonLast = challenges.slice(0, -1);
-    nonLast.forEach((c) => {
-      if (c.type === "final_riddle") {
-        updateChallenge(c.id, { type: "sequence" });
-        toast.info(`Compartment ${c.level} type reset to Sequence — Final Riddle is only allowed on the last compartment.`);
-      }
-    });
-  }, [challenges.length]);
 
   async function addCompartment() {
     if (!sessionId) return;
@@ -427,9 +416,7 @@ export default function TeacherSession() {
                   <option value="multiple_choice">Multiple Choice</option>
                   <option value="short_answer">Short Answer</option>
                   <option value="long_text">Long Text</option>
-                  {activePage === challenges.length - 1 && (
-                    <option value="final_riddle">Final Riddle</option>
-                  )}
+                  <option value="final_riddle">Riddle</option>
                 </select>
               </div>
 
@@ -445,14 +432,17 @@ export default function TeacherSession() {
                 </label>
               )}
 
-              <label className="block text-xs">
-                <span className="font-semibold text-primary">Question / Prompt</span>
-                <textarea
-                  className="field-input mt-1 min-h-[140px] sm:min-h-[160px] md:min-h-[200px] text-sm"
-                  value={activeChallenge.question_text || ""}
-                  onChange={(e) => updateChallenge(activeChallenge.id, { question_text: e.target.value })}
-                />
-              </label>
+              {/* Question / Prompt - single field for sequence/final_riddle/multiple_choice */}
+              {(activeChallenge.type === "sequence" || activeChallenge.type === "final_riddle" || activeChallenge.type === "multiple_choice") && (
+                <label className="block text-xs">
+                  <span className="font-semibold text-primary">Question / Prompt</span>
+                  <textarea
+                    className="field-input mt-1 min-h-[140px] sm:min-h-[160px] md:min-h-[200px] text-sm"
+                    value={activeChallenge.question_text || ""}
+                    onChange={(e) => updateChallenge(activeChallenge.id, { question_text: e.target.value })}
+                  />
+                </label>
+              )}
 
               {(activeChallenge.type === "sequence" || activeChallenge.type === "final_riddle") && (
                 <label className="block text-xs">
@@ -465,20 +455,248 @@ export default function TeacherSession() {
                 </label>
               )}
 
-              {(activeChallenge.type === "short_answer" || activeChallenge.type === "long_text") && (
-                <label className="block text-xs">
-                  <span className="font-semibold text-primary">Keywords (comma-separated)</span>
-                  <input
-                    className="field-input mt-1 text-sm py-4 sm:py-3"
-                    value={(activeChallenge.keywords || []).join(", ")}
-                    onChange={(e) =>
-                      updateChallenge(activeChallenge.id, {
-                        keywords: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean),
-                      })
-                    }
-                  />
-                </label>
-              )}
+              {/* Multi-Question editor for short_answer and long_text */}
+              {(activeChallenge.type === "short_answer" || activeChallenge.type === "long_text") && (() => {
+                // keywords stored as: string[] (legacy single Q) OR {text,keywords[]}[] (multi-Q)
+                const raw: any = activeChallenge.keywords || [];
+                const isMultiQ = raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0];
+
+                type SAQuestion = { text: string; keywords: string[] };
+                const questions: SAQuestion[] = isMultiQ
+                  ? (raw as SAQuestion[])
+                  : [{ text: activeChallenge.question_text || "", keywords: raw as string[] }];
+
+                function save(next: SAQuestion[]) {
+                  updateChallenge(activeChallenge.id, { keywords: next });
+                }
+
+                function updateQText(qi: number, text: string) {
+                  save(questions.map((q, i) => i === qi ? { ...q, text } : q));
+                }
+
+                function updateKeywords(qi: number, val: string) {
+                  save(questions.map((q, i) =>
+                    i === qi ? { ...q, keywords: val.split(",").map((s: string) => s.trim()).filter(Boolean) } : q
+                  ));
+                }
+
+                function addQuestion() {
+                  save([...questions, { text: "", keywords: [] }]);
+                }
+
+                function removeQuestion(qi: number) {
+                  if (questions.length <= 1) return;
+                  save(questions.filter((_, i) => i !== qi));
+                }
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-primary">Questions</span>
+                      <button
+                        type="button"
+                        onClick={addQuestion}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                      >
+                        <Plus className="w-3 h-3" /> Add Question
+                      </button>
+                    </div>
+
+                    {questions.map((q, qi) => (
+                      <div key={qi} className="rounded-xl border-2 border-border bg-muted/10 p-3 space-y-2">
+                        <div className="flex items-start gap-2">
+                          <span className="shrink-0 text-[11px] font-bold text-primary bg-muted rounded px-1.5 py-0.5 mt-2">Q{qi + 1}</span>
+                          <textarea
+                            className="field-input flex-1 text-sm min-h-[80px]"
+                            placeholder={"Question " + (qi + 1)}
+                            value={q.text}
+                            onChange={(e) => updateQText(qi, e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeQuestion(qi)}
+                            disabled={questions.length <= 1}
+                            title="Remove question"
+                            className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 transition disabled:opacity-30 mt-2"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="pl-8">
+                          <label className="block text-[11px] text-muted-foreground font-semibold mb-1">
+                            Keywords (comma-separated)
+                          </label>
+                          <input
+                            className="field-input w-full text-sm py-2"
+                            placeholder="e.g. warn, truth, listen"
+                            value={q.keywords.join(", ")}
+                            onChange={(e) => updateKeywords(qi, e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+
+              {/* Multi-Question Multiple Choice Editor */}
+              {activeChallenge.type === "multiple_choice" && (() => {
+                const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                const rawOpts: any[] = activeChallenge.options || [];
+
+                // Detect format: new [{text, choices:[]}] vs legacy flat [{label,is_correct}]
+                const isMultiQ = rawOpts.length > 0 && "choices" in rawOpts[0];
+
+                type Choice = { label: string; is_correct: boolean };
+                type Question = { text: string; choices: Choice[] };
+                const questions: Question[] = isMultiQ
+                  ? (rawOpts as Question[])
+                  : [{ text: activeChallenge.question_text || "", choices: rawOpts as Choice[] }];
+
+                function save(next: Question[]) {
+                  updateChallenge(activeChallenge.id, { options: next });
+                }
+
+                function choiceText(label: string) {
+                  return label.includes(". ") ? label.split(". ").slice(1).join(". ") : label;
+                }
+
+                function updateQText(qi: number, text: string) {
+                  save(questions.map((q, i) => i === qi ? { ...q, text } : q));
+                }
+
+                function addQuestion() {
+                  save([...questions, { text: "", choices: [{ label: "A. ", is_correct: true }] }]);
+                }
+
+                function removeQuestion(qi: number) {
+                  if (questions.length <= 1) return;
+                  save(questions.filter((_, i) => i !== qi));
+                }
+
+                function updateChoiceText(qi: number, ci: number, text: string) {
+                  const letter = LETTERS[ci] ?? String(ci + 1);
+                  save(questions.map((q, i) => i !== qi ? q : {
+                    ...q,
+                    choices: q.choices.map((ch, j) =>
+                      j === ci ? { ...ch, label: `${letter}. ${text}` } : ch
+                    ),
+                  }));
+                }
+
+                function markCorrect(qi: number, ci: number) {
+                  save(questions.map((q, i) => i !== qi ? q : {
+                    ...q,
+                    choices: q.choices.map((ch, j) => ({ ...ch, is_correct: j === ci })),
+                  }));
+                }
+
+                function addChoice(qi: number) {
+                  save(questions.map((q, i) => {
+                    if (i !== qi) return q;
+                    const letter = LETTERS[q.choices.length] ?? String(q.choices.length + 1);
+                    return { ...q, choices: [...q.choices, { label: `${letter}. `, is_correct: false }] };
+                  }));
+                }
+
+                function removeChoice(qi: number, ci: number) {
+                  save(questions.map((q, i) => {
+                    if (i !== qi) return q;
+                    if (q.choices.length <= 1) return q;
+                    const filtered = q.choices.filter((_, j) => j !== ci);
+                    const relabeled = filtered.map((ch, j) => ({
+                      ...ch, label: `${LETTERS[j] ?? j + 1}. ${choiceText(ch.label)}`,
+                    }));
+                    if (!relabeled.some((ch) => ch.is_correct)) relabeled[0].is_correct = true;
+                    return { ...q, choices: relabeled };
+                  }));
+                }
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-primary">Questions &amp; Choices</span>
+                      <button
+                        type="button"
+                        onClick={addQuestion}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                      >
+                        <Plus className="w-3 h-3" /> Add Question
+                      </button>
+                    </div>
+
+                    {questions.map((q, qi) => (
+                      <div key={qi} className="rounded-xl border-2 border-border bg-muted/10 p-3 space-y-2">
+                        {/* Question row */}
+                        <div className="flex items-center gap-2">
+                          <span className="shrink-0 text-[11px] font-bold text-primary bg-muted rounded px-1.5 py-0.5">Q{qi + 1}</span>
+                          <input
+                            className="field-input flex-1 text-sm py-2"
+                            placeholder={`Question ${qi + 1}`}
+                            value={q.text}
+                            onChange={(e) => updateQText(qi, e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeQuestion(qi)}
+                            disabled={questions.length <= 1}
+                            title="Remove question"
+                            className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 transition disabled:opacity-30"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Choices */}
+                        <div className="space-y-1.5 pl-6">
+                          {q.choices.map((ch, ci) => {
+                            const letter = LETTERS[ci] ?? String(ci + 1);
+                            return (
+                              <div key={ci} className="flex items-center gap-1.5">
+                                <span className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold border-2 transition ${
+                                  ch.is_correct ? "border-success bg-success text-white" : "border-border bg-muted text-muted-foreground"
+                                }`}>{letter}</span>
+                                <input
+                                  className="field-input flex-1 text-sm py-1.5"
+                                  placeholder={`Choice ${letter}`}
+                                  value={choiceText(ch.label)}
+                                  onChange={(e) => updateChoiceText(qi, ci, e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  title={ch.is_correct ? "Correct" : "Mark correct"}
+                                  onClick={() => markCorrect(qi, ci)}
+                                  className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition ${
+                                    ch.is_correct ? "border-success bg-success" : "border-muted-foreground/50 hover:border-success"
+                                  }`}
+                                >
+                                  {ch.is_correct && <span className="block w-2 h-2 rounded-full bg-white" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeChoice(qi, ci)}
+                                  disabled={q.choices.length <= 1}
+                                  className="shrink-0 w-6 h-6 flex items-center justify-center rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 transition disabled:opacity-30"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            onClick={() => addChoice(qi)}
+                            className="flex items-center gap-1 text-[11px] font-semibold text-action hover:underline mt-0.5"
+                          >
+                            <Plus className="w-3 h-3" /> Add Choice
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               <label className="block text-xs">
                 <span className="font-semibold text-primary">Compartment / Padlock Code</span>
