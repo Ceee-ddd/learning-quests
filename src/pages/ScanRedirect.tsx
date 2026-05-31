@@ -65,8 +65,12 @@ export default function ScanRedirect() {
 
       const groupCurrentLevel = group.current_level ?? 1;
 
-      // Enforce: can only scan the QR for the level they're currently on
-      if (fromLevel !== groupCurrentLevel) {
+      // Enforce: student must scan the NEXT compartment's QR (currentLevel + 1)
+      // Special case: if currentLevel === 1 and they haven't started (start_time is null),
+      // they may be scanning QR 1 to enter the story/challenge — allow from=1 too.
+      const expectedFromLevel = groupCurrentLevel + 1;
+      const isInitialScan = groupCurrentLevel === 1 && !group.start_time && fromLevel === 1;
+      if (fromLevel !== expectedFromLevel && !isInitialScan) {
         setCurrentLevel(groupCurrentLevel);
         setStatus("wrong_level");
         return;
@@ -112,8 +116,8 @@ export default function ScanRedirect() {
             <div className="text-4xl">🔒</div>
             <h2 className="text-lg font-bold text-primary">Wrong Compartment</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              This QR is for Compartment {fromLevel}, but you're on Compartment {currentLevel}.
-              You must complete the compartments in order.
+              This QR is for Compartment {fromLevel}, but you need to scan the QR inside Compartment {currentLevel + 1} to continue.
+              Make sure you're opening the right compartment.
             </p>
             <button
               onClick={() => {
