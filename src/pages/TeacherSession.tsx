@@ -225,8 +225,8 @@ export default function TeacherSession() {
   const joinUrl = `${window.location.origin}/join/${session.id}`;
   const activeChallenge = challenges[activePage] ?? null;
   const totalCompartments = challenges.length;
-  // Compartments that get a QR (all except the last, since last has no "next" to unlock)
-  const unlockLevels = challenges.slice(0, -1).map((c) => c.level);
+  // All compartments get a QR — including the last one
+  const unlockLevels = challenges.map((c) => c.level);
 
   return (
     <div className="app-shell pb-16">
@@ -291,20 +291,20 @@ export default function TeacherSession() {
         <div className="app-card space-y-3">
           <div className="font-bold text-primary">Compartment Unlock QRs</div>
           <p className="text-xs text-muted-foreground">
-            Print and place inside each physical compartment. After a group solves Compartment N,
-            they scan its QR to unlock the next level.
+            Print and place inside each physical compartment. Works for all groups — each student's device is recognised automatically when they scan.
           </p>
           {unlockLevels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">Add at least 2 compartments to generate unlock QRs.</p>
+            <p className="text-xs text-muted-foreground italic">Add at least 1 compartment to generate unlock QRs.</p>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               {unlockLevels.map((n) => {
                 const canvasId = `unlock-qr-${n}`;
+                const qrUrl = `${window.location.origin}/session/${sessionId}/scan?from=${n}`;
                 return (
                   <div key={n} className="bg-background rounded-xl p-3 text-center space-y-1.5 border border-border">
                     <div className="text-xs font-semibold text-primary">Compartment {n}</div>
                     <div className="bg-white p-1.5 rounded-lg inline-block">
-                      <QRCodeCanvas id={canvasId} value={`?from=${n}`} size={88} includeMargin />
+                      <QRCodeCanvas id={canvasId} value={qrUrl} size={88} includeMargin />
                     </div>
                     <button
                       onClick={() => downloadQr(canvasId, `compartment-${n}-unlock.png`)}
@@ -317,10 +317,6 @@ export default function TeacherSession() {
               })}
             </div>
           )}
-          <p className="text-[11px] text-muted-foreground">
-            Tip: For per-group QR codes, use each group's{" "}
-            <code>/play/&lt;id&gt;/scan?from=N</code> URL.
-          </p>
         </div>
 
         {/* ── Challenge Builder — Paginated ── */}
@@ -845,7 +841,7 @@ export default function TeacherSession() {
       {/* ── Hidden QR Print Area ── */}
       {createPortal(
         <div id="qr-print-area">
-          <div className="print-qr-item">
+          <div className="print-qr-item print-join-item">
             <div className="print-label">Session Code</div>
             <div className="print-sublabel">{session.join_code}</div>
             <QRCodeCanvas id="print-join-qr" value={joinUrl} size={160} includeMargin />
@@ -857,7 +853,7 @@ export default function TeacherSession() {
               <div className="print-sublabel">Place inside compartment {n}</div>
               <QRCodeCanvas
                 id={`print-unlock-qr-${n}`}
-                value={`${window.location.origin}/play/SCAN/scan?from=${n}`}
+                value={`${window.location.origin}/session/${sessionId}/scan?from=${n}`}
                 size={160}
                 includeMargin
               />

@@ -12,6 +12,7 @@ import TeacherLogin from "./pages/TeacherLogin.tsx";
 import TeacherDashboard from "./pages/TeacherDashboard.tsx";
 import TeacherSession from "./pages/TeacherSession.tsx";
 import TeacherResetPassword from "./pages/TeacherResetPassword.tsx";
+import ScanRedirect from "./pages/ScanRedirect.tsx";
 
 const queryClient = new QueryClient();
 
@@ -31,6 +32,7 @@ const App = () => (
           <Route path="/join/:sessionId" element={<Join />} />
           <Route path="/play/:groupId" element={<Play />} />
           <Route path="/play/:groupId/scan" element={<Play />} />
+          <Route path="/session/:sessionId/scan" element={<ScanRedirect />} />
           <Route path="/complete/:groupId" element={<Complete />} />
           <Route path="/teacher/login" element={<TeacherLogin />} />
           <Route path="/teacher/dashboard" element={<TeacherDashboard />} />

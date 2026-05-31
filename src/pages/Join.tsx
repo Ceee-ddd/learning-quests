@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "@/components/AppHeader";
 import { InfoBox } from "@/components/InfoBox";
@@ -12,6 +12,8 @@ type FormMode = "register" | "reconnect";
 export default function Join() {
   const { sessionId } = useParams();
   const nav = useNavigate();
+  const [joinParams] = useSearchParams();
+  const fromLevel = joinParams.get("from"); // set when arriving via a compartment QR
   const [session, setSession] = useState<any>(null);
   const [open, setOpen] = useState(false);
   const [activeForm, setActiveForm] = useState<FormMode>("register");
@@ -63,7 +65,8 @@ export default function Join() {
           .update({ start_time: new Date().toISOString() })
           .eq("id", registeredGroupId);
         clearInterval(pollRef.current!);
-        nav(`/play/${registeredGroupId}`);
+        localStorage.setItem(`group_${sessionId}`, registeredGroupId);
+        nav(fromLevel ? `/play/${registeredGroupId}/scan?from=${fromLevel}` : `/play/${registeredGroupId}`);
       }
     };
 
@@ -118,9 +121,10 @@ export default function Join() {
 
         toast.success("Group registered!");
 
+        localStorage.setItem(`group_${sessionId}`, data.id);
         if (latest?.started_at) {
           await supabase.from("groups").update({ start_time: new Date().toISOString() }).eq("id", data.id);
-          nav(`/play/${data.id}`);
+          nav(fromLevel ? `/play/${data.id}/scan?from=${fromLevel}` : `/play/${data.id}`);
         } else {
           setRegisteredGroupId(data.id);
           setPhase("waiting");
@@ -140,7 +144,8 @@ export default function Join() {
           if (!group.start_time && latest?.started_at) {
             await supabase.from("groups").update({ start_time: new Date().toISOString() }).eq("id", group.id);
           }
-          nav(`/play/${group.id}`);
+          localStorage.setItem(`group_${sessionId}`, group.id);
+          nav(fromLevel ? `/play/${group.id}/scan?from=${fromLevel}` : `/play/${group.id}`);
         } else {
           toast.success("Group found. Reconnected and waiting for teacher to start.");
           setRegisteredGroupId(group.id);
