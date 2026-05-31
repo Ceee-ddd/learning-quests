@@ -3,18 +3,26 @@ import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "@/components/AppHeader";
 import { InfoBox } from "@/components/InfoBox";
-import { Users, AlertTriangle, Plus, X, Clock, Loader2 } from "lucide-react";
+import { Users, AlertTriangle, Plus, X, Clock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 type Phase = "register" | "waiting";
+type FormMode = "register" | "reconnect";
 
 export default function Join() {
   const { sessionId } = useParams();
   const nav = useNavigate();
   const [session, setSession] = useState<any>(null);
   const [open, setOpen] = useState(false);
+  const [activeForm, setActiveForm] = useState<FormMode>("register");
   const [groupName, setGroupName] = useState("");
+  const [password, setPassword] = useState("");
   const [members, setMembers] = useState<string[]>([""]);
+  const [pendingMemberAction, setPendingMemberAction] = useState<{
+    type: "add" | "remove";
+    index?: number;
+  } | null>(null);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [phase, setPhase] = useState<Phase>("register");
   const [registeredGroupId, setRegisteredGroupId] = useState<string | null>(null);
@@ -67,36 +75,91 @@ export default function Join() {
     };
   }, [phase, registeredGroupId, sessionId, nav]);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!groupName.trim()) return toast.error("Please enter a group name");
-    const cleanMembers = members.map((m) => m.trim()).filter(Boolean);
-    if (cleanMembers.length === 0) return toast.error("Add at least one member");
+  async function performSubmit() {
+    if (!sessionId) return toast.error("Session not found.");
 
     const { data: latest } = await supabase
       .from("sessions").select("allow_late_registration,is_active,started_at").eq("id", sessionId!).maybeSingle();
     if (latest?.is_active === false) return toast.error("This session is not active.");
-    if (latest?.allow_late_registration === false) return toast.error("Registration is now closed.");
+    if (activeForm === "register" && latest?.allow_late_registration === false) return toast.error("Registration is now closed.");
+    if (!groupName.trim()) return toast.error(activeForm === "register" ? "Please enter a group name" : "Enter your group name.");
+    if (!password.trim()) return toast.error("Password is required.");
+
+    const normalizedName = groupName.trim();
+    const { data: existingGroups, error: lookupError } = await supabase
+      .from("groups")
+      .select("id")
+      .eq("session_id", sessionId)
+      .ilike("group_name", normalizedName)
+      .limit(1);
+
+    if (lookupError) return toast.error(lookupError.message);
+    if (activeForm === "register" && existingGroups?.length) {
+      return toast.error("A group with that name already exists in this session. Choose a different name.");
+    }
 
     setSubmitting(true);
-    const { data, error } = await supabase
-      .from("groups")
-      .insert({ session_id: sessionId, group_name: groupName.trim(), members: cleanMembers })
-      .select()
-      .single();
-    setSubmitting(false);
-    if (error) return toast.error(error.message);
+    try {
+      if (activeForm === "register") {
+        const cleanMembers = members.map((m) => m.trim()).filter(Boolean);
+        if (cleanMembers.length === 0) return toast.error("Add at least one member");
 
-    toast.success("Group registered!");
+        const { data, error } = await supabase
+          .from("groups")
+          .insert({
+            session_id: sessionId,
+            group_name: normalizedName,
+            members: cleanMembers,
+            password: password.trim(),
+          })
+          .select()
+          .single();
+        if (error) return toast.error(error.message);
 
-    // If session already started, go straight to play
-    if (latest.started_at) {
-      await supabase.from("groups").update({ start_time: new Date().toISOString() }).eq("id", data.id);
-      nav(`/play/${data.id}`);
-    } else {
-      setRegisteredGroupId(data.id);
-      setPhase("waiting");
+        toast.success("Group registered!");
+
+        if (latest?.started_at) {
+          await supabase.from("groups").update({ start_time: new Date().toISOString() }).eq("id", data.id);
+          nav(`/play/${data.id}`);
+        } else {
+          setRegisteredGroupId(data.id);
+          setPhase("waiting");
+        }
+      } else {
+        const { data: group, error } = await supabase
+          .from("groups")
+          .select("id, start_time")
+          .eq("session_id", sessionId)
+          .eq("group_name", groupName.trim())
+          .eq("password", password.trim())
+          .maybeSingle();
+        if (error) return toast.error(error.message);
+        if (!group) return toast.error("Group name or password not found. Check and try again.");
+
+        if (latest?.started_at || group.start_time) {
+          if (!group.start_time && latest?.started_at) {
+            await supabase.from("groups").update({ start_time: new Date().toISOString() }).eq("id", group.id);
+          }
+          nav(`/play/${group.id}`);
+        } else {
+          toast.success("Group found. Reconnected and waiting for teacher to start.");
+          setRegisteredGroupId(group.id);
+          setPhase("waiting");
+        }
+      }
+    } finally {
+      setSubmitting(false);
     }
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setShowSubmitConfirm(true);
+  }
+
+  async function confirmSubmit() {
+    setShowSubmitConfirm(false);
+    await performSubmit();
   }
 
   if (!session) {
@@ -221,42 +284,114 @@ export default function Join() {
           </p>
         </div>
 
-        <InfoBox icon={Users} label="Group Registration" onClick={() => setOpen((v) => !v)}>
-          Tap to {open ? "hide" : "open"} the registration form.
-        </InfoBox>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <InfoBox
+            icon={Users}
+            label="Register new group"
+            onClick={() => { setActiveForm("register"); setOpen(true); }}
+          >
+            Register your group and set a required group password.
+          </InfoBox>
+          <InfoBox
+            icon={Users}
+            label="Reconnect session"
+            onClick={() => { setActiveForm("reconnect"); setOpen(true); }}
+          >
+            Reconnect using your group name and password if you lost the join link.
+          </InfoBox>
+        </div>
 
         {open && (
           <form onSubmit={submit} className="app-card space-y-3 animate-pop-in">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveForm("register")}
+                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  activeForm === "register" ? "bg-action text-white" : "border border-border bg-background text-muted-foreground"
+                }`}
+              >
+                Register
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveForm("reconnect")}
+                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  activeForm === "reconnect" ? "bg-action text-white" : "border border-border bg-background text-muted-foreground"
+                }`}
+              >
+                Reconnect
+              </button>
+            </div>
+
             <label className="block">
               <span className="text-sm font-semibold text-primary">Group Name</span>
               <input className="field-input mt-1" value={groupName} onChange={(e) => setGroupName(e.target.value)} maxLength={60} />
             </label>
-            <div className="space-y-2">
-              <span className="text-sm font-semibold text-primary">Members</span>
-              {members.map((m, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    className="field-input"
-                    placeholder={`Member ${i + 1}`}
-                    value={m}
-                    maxLength={60}
-                    onChange={(e) => setMembers(members.map((mm, j) => (i === j ? e.target.value : mm)))}
-                  />
-                  {members.length > 1 && (
-                    <button type="button" onClick={() => setMembers(members.filter((_, j) => j !== i))} className="px-3 rounded-xl bg-muted text-muted-foreground">
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
-              {members.length < 6 && (
-                <button type="button" onClick={() => setMembers([...members, ""])} className="text-sm text-action font-semibold flex items-center gap-1">
-                  <Plus className="w-4 h-4" /> Add member
-                </button>
-              )}
-            </div>
-            <button disabled={submitting} className="btn-primary">
-              {submitting ? "Registering..." : "Register Group"}
+
+            <label className="block">
+              <span className="text-sm font-semibold text-primary">Group Password <span className="text-destructive">(required)</span></span>
+              <input
+                type="password"
+                className="field-input mt-1"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Required password for reconnecting"
+                maxLength={32}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                This password is required and visible to the teacher along with your group name and members.
+              </p>
+            </label>
+
+            {activeForm === "register" && (
+              <div className="space-y-2">
+                <span className="text-sm font-semibold text-primary">Members</span>
+                {members.map((m, i) => (
+                  <div key={i} className="flex flex-wrap items-center gap-2">
+                    <input
+                      className="field-input flex-1 min-w-[160px]"
+                      placeholder={`Member ${i + 1}`}
+                      value={m}
+                      maxLength={60}
+                      onChange={(e) => setMembers(members.map((mm, j) => (i === j ? e.target.value : mm)))}
+                    />
+                    {members.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setPendingMemberAction({ type: "remove", index: i })}
+                        className="rounded-xl border border-destructive px-3 py-2 text-sm font-semibold text-destructive hover:bg-destructive/10 transition"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {members.length < 6 && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingMemberAction({ type: "add" })}
+                    className="text-sm text-action font-semibold flex items-center gap-1"
+                  >
+                    <Plus className="w-4 h-4" /> Add member
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => setShowSubmitConfirm(true)}
+              className="btn-primary"
+            >
+              {submitting
+                ? activeForm === "register"
+                  ? "Registering..."
+                  : "Reconnecting..."
+                : activeForm === "register"
+                ? "Register Group"
+                : "Reconnect"}
             </button>
           </form>
         )}
@@ -264,6 +399,98 @@ export default function Join() {
         <InfoBox icon={AlertTriangle} label="Only registered groups can continue to the activity." tone="warning">
           Make sure your group is registered above before you head to Compartment 1.
         </InfoBox>
+
+        {showSubmitConfirm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowSubmitConfirm(false); }}
+          >
+            <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 animate-pop-in">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 text-action">
+                  <Users className="w-5 h-5 flex-shrink-0" />
+                  <h2 className="text-lg font-bold">
+                    {activeForm === "register" ? "Confirm Registration" : "Confirm Reconnect"}
+                  </h2>
+                </div>
+                <button onClick={() => setShowSubmitConfirm(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {activeForm === "register"
+                  ? "Are you ready to register your group? Once confirmed, your group name, password, and members will be saved and visible to the teacher."
+                  : "Confirm reconnect by group name and password. Your teacher can see the password for support if needed."}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSubmitConfirm(false)}
+                  className="flex-1 rounded-xl border-2 border-border py-2 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmSubmit}
+                  disabled={submitting}
+                  className="flex-1 rounded-xl py-2 text-sm font-semibold text-white transition bg-action hover:opacity-90 disabled:opacity-50"
+                >
+                  {activeForm === "register" ? "Register now" : "Reconnect now"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingMemberAction && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setPendingMemberAction(null); }}
+          >
+            <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 animate-pop-in">
+              <div className="flex items-start justify-between gap-2">
+                <div className={`flex items-center gap-2 ${pendingMemberAction.type === "remove" ? "text-destructive" : "text-action"}`}>
+                  {pendingMemberAction.type === "remove" ? (
+                    <Trash2 className="w-5 h-5 flex-shrink-0" />
+                  ) : (
+                    <Plus className="w-5 h-5 flex-shrink-0" />
+                  )}
+                  <h2 className="text-lg font-bold">
+                    {pendingMemberAction.type === "remove" ? "Remove Member" : "Add Member"}
+                  </h2>
+                </div>
+                <button onClick={() => setPendingMemberAction(null)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {pendingMemberAction.type === "remove"
+                  ? `Remove member ${pendingMemberAction.index !== undefined ? pendingMemberAction.index + 1 : ""}? This will delete that member field.`
+                  : "Add a new member field for your group. Confirm to proceed."}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPendingMemberAction(null)}
+                  className="flex-1 rounded-xl border-2 border-border py-2 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (pendingMemberAction?.type === "add") {
+                      setMembers((prev) => [...prev, ""]);
+                    } else if (pendingMemberAction?.type === "remove" && pendingMemberAction.index !== undefined) {
+                      setMembers((prev) => prev.filter((_, idx) => idx !== pendingMemberAction.index));
+                    }
+                    setPendingMemberAction(null);
+                  }}
+                  className={`flex-1 rounded-xl py-2 text-sm font-semibold text-white transition ${pendingMemberAction.type === "remove" ? "bg-destructive hover:opacity-90" : "bg-action hover:opacity-90"}`}
+                >
+                  {pendingMemberAction.type === "remove" ? "Remove Member" : "Add Member"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

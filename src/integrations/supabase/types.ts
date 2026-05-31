@@ -72,6 +72,7 @@ export type Database = {
           group_name: string
           id: string
           members: Json
+          password: string
           session_id: string
           start_time: string | null
         }
@@ -82,6 +83,7 @@ export type Database = {
           group_name: string
           id?: string
           members?: Json
+          password?: string
           session_id: string
           start_time?: string | null
         }
@@ -92,6 +94,7 @@ export type Database = {
           group_name?: string
           id?: string
           members?: Json
+          password?: string
           session_id?: string
           start_time?: string | null
         }

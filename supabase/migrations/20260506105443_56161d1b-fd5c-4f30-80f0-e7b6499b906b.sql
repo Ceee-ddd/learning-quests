@@ -46,7 +46,8 @@ create table public.groups (
   current_level integer not null default 1,
   start_time timestamptz,
   finish_time timestamptz,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  password text not null default ''::text
 );
 alter table public.groups enable row level security;
 

@@ -43,6 +43,7 @@ interface AnimatedRowProps {
   rank: number | null;
   isFinished: boolean;
   groupName: string;
+  password?: string;
   elapsed: number;
   currentLevel: number;
   pct: number;
@@ -52,7 +53,7 @@ interface AnimatedRowProps {
 }
 
 function AnimatedRow({
-  groupId, rank, isFinished, groupName, elapsed,
+  groupId, rank, isFinished, groupName, password, elapsed,
   currentLevel, pct, membersExpanded, memberList, onToggleExpand,
 }: AnimatedRowProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -194,6 +195,11 @@ function AnimatedRow({
           </div>
         </div>
 
+        {password !== undefined && (
+          <div className="px-3 pb-2 text-xs text-muted-foreground">
+            Password: <span className="font-semibold text-foreground">{password || "(none)"}</span>
+          </div>
+        )}
         {membersExpanded && memberList.length > 0 && (
           <div className="border-t border-border bg-muted/30 px-3 py-2.5 space-y-1">
             {memberList.map((name, i) => (
@@ -682,6 +688,7 @@ export default function TeacherDashboard() {
                         rank={rank}
                         isFinished={isFinished}
                         groupName={g.group_name}
+                        password={g.password}
                         elapsed={elapsed}
                         currentLevel={g.current_level}
                         pct={pct}
