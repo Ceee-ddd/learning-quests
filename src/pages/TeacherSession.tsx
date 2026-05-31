@@ -5,7 +5,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppHeader } from "@/components/AppHeader";
-import { ArrowLeft, Save, ChevronDown, ChevronUp, Download, Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Save, ChevronDown, ChevronUp, Download, Plus, Trash2, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { toast } from "sonner";
 
 // Inject print styles once
@@ -91,6 +91,9 @@ export default function TeacherSession() {
   const [saving, setSaving] = useState(false);
   const [addingCompartment, setAddingCompartment] = useState(false);
   const [removingCompartment, setRemovingCompartment] = useState(false);
+  const [showAddConfirm, setShowAddConfirm] = useState(false);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<any>(null);
   const [dirtyPages, setDirtyPages] = useState<Set<string>>(new Set());
 
   useEffect(() => { injectPrintStyles(); }, []);
@@ -176,15 +179,22 @@ export default function TeacherSession() {
     toast.success(`Compartment ${nextLevel} added`);
   }
 
-  async function removeCompartment(c: any) {
+  // Trigger removal confirmation modal
+  function removeCompartment(c: any) {
     if (challenges.length <= 1) { toast.error("You need at least one compartment."); return; }
-    const confirmed = window.confirm(`Delete Compartment ${c.level}? This cannot be undone.`);
-    if (!confirmed) return;
+    setRemoveTarget(c);
+    setShowRemoveConfirm(true);
+  }
+
+  // Perform removal after confirmation
+  async function confirmRemoveCompartment() {
+    const c = removeTarget;
+    if (!c) return;
+    setShowRemoveConfirm(false);
     setRemovingCompartment(true);
     const { error } = await supabase.from("challenges").delete().eq("id", c.id);
     if (error) { setRemovingCompartment(false); toast.error(error.message); return; }
     // Re-number sequentially one-by-one to avoid transient unique constraint violations.
-    // Parallel updates can collide when two rows temporarily share the same level number.
     const remaining = challenges.filter((x) => x.id !== c.id);
     const renumbered = remaining.map((x, i) => ({ ...x, level: i + 1 }));
     for (const x of renumbered) {
@@ -194,6 +204,7 @@ export default function TeacherSession() {
     setChallenges(renumbered);
     setDirtyPages((prev) => { const n = new Set(prev); n.delete(c.id); return n; });
     toast.success(`Compartment ${c.level} removed`);
+    setRemoveTarget(null);
   }
 
   function downloadQr(canvasId: string, filename: string) {
@@ -335,7 +346,7 @@ export default function TeacherSession() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Remove button */}
+              {/* Remove button (opens confirm modal) */}
               <button
                 onClick={() => activeChallenge && removeCompartment(activeChallenge)}
                 disabled={removingCompartment || totalCompartments <= 1}
@@ -344,9 +355,9 @@ export default function TeacherSession() {
               >
                 <Trash2 className="w-4 h-4" />
               </button>
-              {/* Add button */}
+              {/* Add button (opens confirm modal) */}
               <button
-                onClick={addCompartment}
+                onClick={() => setShowAddConfirm(true)}
                 disabled={addingCompartment}
                 title="Add compartment"
                 className="w-8 h-8 flex items-center justify-center rounded-lg border-2 border-action/50 text-action hover:bg-action/10 transition disabled:opacity-50"
@@ -427,7 +438,7 @@ export default function TeacherSession() {
                 <label className="block text-xs">
                   <span className="font-semibold text-primary">Story Text</span>
                   <textarea
-                    className="field-input mt-1 min-h-[120px] text-sm"
+                    className="field-input mt-1 min-h-[160px] sm:min-h-[200px] md:min-h-[240px] text-sm"
                     value={activeChallenge.story_text || ""}
                     onChange={(e) => updateChallenge(activeChallenge.id, { story_text: e.target.value })}
                   />
@@ -437,7 +448,7 @@ export default function TeacherSession() {
               <label className="block text-xs">
                 <span className="font-semibold text-primary">Question / Prompt</span>
                 <textarea
-                  className="field-input mt-1 min-h-[80px] text-sm"
+                  className="field-input mt-1 min-h-[140px] sm:min-h-[160px] md:min-h-[200px] text-sm"
                   value={activeChallenge.question_text || ""}
                   onChange={(e) => updateChallenge(activeChallenge.id, { question_text: e.target.value })}
                 />
@@ -447,7 +458,7 @@ export default function TeacherSession() {
                 <label className="block text-xs">
                   <span className="font-semibold text-primary">Correct Answer Code</span>
                   <input
-                    className="field-input mt-1 text-sm"
+                    className="field-input mt-1 text-sm py-4 sm:py-3"
                     value={activeChallenge.correct_answer_code || ""}
                     onChange={(e) => updateChallenge(activeChallenge.id, { correct_answer_code: e.target.value })}
                   />
@@ -458,7 +469,7 @@ export default function TeacherSession() {
                 <label className="block text-xs">
                   <span className="font-semibold text-primary">Keywords (comma-separated)</span>
                   <input
-                    className="field-input mt-1 text-sm"
+                    className="field-input mt-1 text-sm py-4 sm:py-3"
                     value={(activeChallenge.keywords || []).join(", ")}
                     onChange={(e) =>
                       updateChallenge(activeChallenge.id, {
@@ -472,7 +483,7 @@ export default function TeacherSession() {
               <label className="block text-xs">
                 <span className="font-semibold text-primary">Compartment / Padlock Code</span>
                 <input
-                  className="field-input mt-1 text-sm"
+                  className="field-input mt-1 text-sm py-4 sm:py-3"
                   value={activeChallenge.compartment_code || ""}
                   onChange={(e) => updateChallenge(activeChallenge.id, { compartment_code: e.target.value })}
                 />
@@ -481,7 +492,7 @@ export default function TeacherSession() {
               <label className="block text-xs">
                 <span className="font-semibold text-primary">Reveal Message</span>
                 <textarea
-                  className="field-input mt-1 text-sm"
+                  className="field-input mt-1 min-h-[120px] sm:min-h-[140px] text-sm"
                   value={activeChallenge.reveal_message || ""}
                   onChange={(e) => updateChallenge(activeChallenge.id, { reveal_message: e.target.value })}
                 />
@@ -531,11 +542,87 @@ export default function TeacherSession() {
           ) : (
             <div className="px-4 pb-6 pt-4 text-center text-muted-foreground text-sm">
               No compartments yet.{" "}
-              <button onClick={addCompartment} className="text-action font-semibold underline">Add one</button>.
+              <button onClick={() => setShowAddConfirm(true)} className="text-action font-semibold underline">Add one</button>.
             </div>
           )}
         </div>
       </div>
+
+      {/* Add Compartment Confirmation Modal */}
+      {showAddConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAddConfirm(false); }}
+        >
+          <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 animate-pop-in">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-action">
+                <Plus className="w-5 h-5 flex-shrink-0" />
+                <h2 className="text-lg font-bold">Add Compartment</h2>
+              </div>
+              <button onClick={() => setShowAddConfirm(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              This will add a new compartment to the session and assign it the next sequential level. Continue?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowAddConfirm(false)}
+                className="flex-1 rounded-xl border-2 border-border py-2 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => { setShowAddConfirm(false); await addCompartment(); }}
+                disabled={addingCompartment}
+                className="flex-1 rounded-xl bg-action py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-40"
+              >
+                {addingCompartment ? "Adding…" : "Add Compartment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Compartment Confirmation Modal */}
+      {showRemoveConfirm && removeTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowRemoveConfirm(false); }}
+        >
+          <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 animate-pop-in">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-destructive">
+                <Trash2 className="w-5 h-5 flex-shrink-0" />
+                <h2 className="text-lg font-bold">Delete Compartment</h2>
+              </div>
+              <button onClick={() => setShowRemoveConfirm(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              This will permanently delete Compartment <span className="font-bold text-primary">{removeTarget.level}</span> and its content. This action cannot be undone.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowRemoveConfirm(false); setRemoveTarget(null); }}
+                className="flex-1 rounded-xl border-2 border-border py-2 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemoveCompartment}
+                disabled={removingCompartment}
+                className="flex-1 rounded-xl bg-destructive py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-40"
+              >
+                {removingCompartment ? "Deleting…" : "Delete Compartment"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Hidden QR Print Area ── */}
       {createPortal(

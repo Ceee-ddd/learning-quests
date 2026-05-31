@@ -227,6 +227,9 @@ export default function TeacherDashboard() {
   const [reuseTarget, setReuseTarget] = useState<any>(null); // session to reuse content from
   const [reusing, setReusing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showCreateConfirm, setShowCreateConfirm] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) nav("/teacher/login");
@@ -455,7 +458,7 @@ export default function TeacherDashboard() {
       <div className="px-4 space-y-4">
         <div className="flex gap-2">
           <button
-            onClick={createSession}
+            onClick={() => setShowCreateConfirm(true)}
             className="btn-primary flex items-center justify-center gap-2"
           >
             <Plus className="w-5 h-5" /> New Session
@@ -479,8 +482,8 @@ export default function TeacherDashboard() {
             );
           })()}
           <button
-            onClick={logout}
-            className="px-4 rounded-full border-2 border-border text-muted-foreground"
+            onClick={() => setShowLogoutConfirm(true)}
+            className="px-4 rounded-full border-2 border-destructive text-destructive hover:bg-destructive/10 transition"
           >
             <LogOut className="w-4 h-4" />
           </button>
@@ -950,6 +953,81 @@ export default function TeacherDashboard() {
                 className="flex-1 rounded-xl bg-destructive py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {deleting ? "Deleting…" : "Delete Session"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Session Confirmation Modal */}
+      {showCreateConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreateConfirm(false); }}
+        >
+          <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 animate-pop-in">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-action">
+                <Plus className="w-5 h-5 flex-shrink-0" />
+                <h2 className="text-lg font-bold">Create New Session</h2>
+              </div>
+              <button onClick={() => setShowCreateConfirm(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              This will create a new session with a fresh join code. Students will be able to join using that code. This action will create associated default challenges.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowCreateConfirm(false)}
+                className="flex-1 rounded-xl border-2 border-border py-2 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => { setShowCreateConfirm(false); setCreating(true); await createSession(); setCreating(false); }}
+                disabled={creating}
+                className="flex-1 rounded-xl bg-action py-2 text-sm font-semibold text-white hover:opacity-90 transition disabled:opacity-40"
+              >
+                {creating ? "Creating…" : "Create Session"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowLogoutConfirm(false); }}
+        >
+          <div className="bg-background rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 animate-pop-in">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <LogOut className="w-5 h-5 flex-shrink-0" />
+                <h2 className="text-lg font-bold">Log Out</h2>
+              </div>
+              <button onClick={() => setShowLogoutConfirm(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              You will be signed out of the teacher dashboard. Any unsaved local state will be lost. Continue?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 rounded-xl border-2 border-border py-2 text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => { setShowLogoutConfirm(false); await logout(); }}
+                className="flex-1 rounded-xl bg-destructive py-2 text-sm font-semibold text-white hover:opacity-90 transition"
+              >
+                Log Out
               </button>
             </div>
           </div>
