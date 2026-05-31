@@ -3,7 +3,19 @@ import { Html5Qrcode } from "html5-qrcode";
 
 export function QRScanner({ onResult, onClose }: { onResult: (text: string) => void; onClose: () => void }) {
   const ref = useRef<Html5Qrcode | null>(null);
+  const stopped = useRef(false);
   const elId = "qr-reader-region";
+
+  async function stopScanner() {
+    if (stopped.current || !ref.current) return;
+    stopped.current = true;
+    try {
+      await ref.current.stop();
+      ref.current.clear();
+    } catch {
+      // already stopped — ignore
+    }
+  }
 
   useEffect(() => {
     const inst = new Html5Qrcode(elId);
@@ -13,14 +25,14 @@ export function QRScanner({ onResult, onClose }: { onResult: (text: string) => v
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 240, height: 240 } },
         (text) => {
-          inst.stop().then(() => inst.clear()).catch(() => {});
-          onResult(text);
+          stopScanner().then(() => onResult(text));
         },
         () => {}
       )
       .catch((e) => console.error("Camera error", e));
+
     return () => {
-      inst.stop().then(() => inst.clear()).catch(() => {});
+      stopScanner();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
