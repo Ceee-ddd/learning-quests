@@ -5,7 +5,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppHeader } from "@/components/AppHeader";
-import { ArrowLeft, Save, ChevronDown, ChevronUp, Download, Plus, Trash2, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, Save, ChevronDown, ChevronUp, Download, Plus, Trash2, ChevronLeft, ChevronRight, X, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 
 // Inject print styles once
@@ -87,8 +87,13 @@ export default function TeacherSession() {
   const [session, setSession] = useState<any>(null);
   const [challenges, setChallenges] = useState<any[]>([]);
   const [joinQrExpanded, setJoinQrExpanded] = useState(true);
-  const [activePage, setActivePage] = useState(0); // index into challenges array
+  const [unlockQrExpanded, setUnlockQrExpanded] = useState(false);
+  // activePage: -1 = Story page, 0+ = compartment index into challenges array
+  const [activePage, setActivePage] = useState(-1);
   const [saving, setSaving] = useState(false);
+  const [storySaving, setStorySaving] = useState(false);
+  const [storyDirty, setStoryDirty] = useState(false);
+  const [localStoryText, setLocalStoryText] = useState<string>("");
   const [addingCompartment, setAddingCompartment] = useState(false);
   const [removingCompartment, setRemovingCompartment] = useState(false);
   const [showAddConfirm, setShowAddConfirm] = useState(false);
@@ -116,6 +121,16 @@ export default function TeacherSession() {
     }
   }, [challenges.length]);
 
+  // Story text is stored on level-1 challenge — declared here (before the useEffect below)
+  const level1Challenge = challenges.find((c) => c.level === 1);
+
+  // Sync localStoryText from DB on initial load (only if not dirty)
+  useEffect(() => {
+    if (!storyDirty && level1Challenge) {
+      setLocalStoryText(level1Challenge.story_text || "");
+    }
+  }, [level1Challenge?.id]);
+
   function markDirty(id: string) {
     setDirtyPages((prev) => new Set(prev).add(id));
   }
@@ -142,6 +157,20 @@ export default function TeacherSession() {
     else {
       toast.success(`Compartment ${c.level} saved`);
       setDirtyPages((prev) => { const n = new Set(prev); n.delete(c.id); return n; });
+    }
+  }
+
+  async function saveStory(text: string) {
+    const level1 = challenges.find((c) => c.level === 1);
+    if (!level1) return toast.error("Add at least one compartment before saving the story.");
+    setStorySaving(true);
+    const { error } = await supabase.from("challenges").update({ story_text: text }).eq("id", level1.id);
+    setStorySaving(false);
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Story saved");
+      setChallenges((arr) => arr.map((c) => c.id === level1.id ? { ...c, story_text: text } : c));
+      setStoryDirty(false);
     }
   }
 
@@ -223,7 +252,7 @@ export default function TeacherSession() {
   if (!session) return <div className="app-shell"><AppHeader /><div className="px-4 text-center">Loading...</div></div>;
 
   const joinUrl = `${window.location.origin}/join/${session.id}`;
-  const activeChallenge = challenges[activePage] ?? null;
+  const activeChallenge = activePage >= 0 ? (challenges[activePage] ?? null) : null;
   const totalCompartments = challenges.length;
   // All compartments get a QR — including the last one
   const unlockLevels = challenges.map((c) => c.level);
@@ -289,32 +318,50 @@ export default function TeacherSession() {
 
         {/* ── Compartment Unlock QRs ── */}
         <div className="app-card space-y-3">
-          <div className="font-bold text-primary">Compartment Unlock QRs</div>
-          <p className="text-xs text-muted-foreground">
-            Print and place inside each physical compartment. Works for all groups — each student's device is recognised automatically when they scan.
-          </p>
-          {unlockLevels.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">Add at least 1 compartment to generate unlock QRs.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {unlockLevels.map((n) => {
-                const canvasId = `unlock-qr-${n}`;
-                const qrUrl = `${window.location.origin}/session/${sessionId}/scan?from=${n}`;
-                return (
-                  <div key={n} className="bg-background rounded-xl p-3 text-center space-y-1.5 border border-border">
-                    <div className="text-xs font-semibold text-primary">Compartment {n}</div>
-                    <div className="bg-white p-1.5 rounded-lg inline-block">
-                      <QRCodeCanvas id={canvasId} value={qrUrl} size={88} includeMargin />
-                    </div>
-                    <button
-                      onClick={() => downloadQr(canvasId, `compartment-${n}-unlock.png`)}
-                      className="text-[10px] text-action font-semibold flex items-center justify-center gap-1 mx-auto"
-                    >
-                      <Download className="w-3 h-3" /> Save
-                    </button>
-                  </div>
-                );
-              })}
+          <button
+            onClick={() => setUnlockQrExpanded((v) => !v)}
+            className="w-full flex items-center justify-between"
+          >
+            <div className="text-left">
+              <div className="font-bold text-primary text-base">Compartment Unlock QRs</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
+                Print and place inside each physical compartment
+              </div>
+            </div>
+            {unlockQrExpanded
+              ? <ChevronUp className="w-5 h-5 text-muted-foreground" />
+              : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
+          </button>
+
+          {unlockQrExpanded && (
+            <div className="space-y-3 animate-pop-in">
+              <p className="text-xs text-muted-foreground">
+                Works for all groups — each student's device is recognised automatically when they scan.
+              </p>
+              {unlockLevels.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">Add at least 1 compartment to generate unlock QRs.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {unlockLevels.map((n) => {
+                    const canvasId = `unlock-qr-${n}`;
+                    const qrUrl = `${window.location.origin}/session/${sessionId}/scan?from=${n}`;
+                    return (
+                      <div key={n} className="bg-background rounded-xl p-3 text-center space-y-1.5 border border-border">
+                        <div className="text-xs font-semibold text-primary">Compartment {n}</div>
+                        <div className="bg-white p-1.5 rounded-lg inline-block">
+                          <QRCodeCanvas id={canvasId} value={qrUrl} size={88} includeMargin />
+                        </div>
+                        <button
+                          onClick={() => downloadQr(canvasId, `compartment-${n}-unlock.png`)}
+                          className="text-[10px] text-action font-semibold flex items-center justify-center gap-1 mx-auto"
+                        >
+                          <Download className="w-3 h-3" /> Save
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -356,11 +403,27 @@ export default function TeacherSession() {
           {challenges.length > 0 && (
             <div className="flex items-center gap-1 px-3 pt-3 pb-2 overflow-x-auto">
               <button
-                onClick={() => setActivePage((p) => Math.max(0, p - 1))}
-                disabled={activePage === 0}
+                onClick={() => setActivePage((p) => Math.max(-1, p - 1))}
+                disabled={activePage === -1}
                 className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-muted transition disabled:opacity-30"
               >
                 <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              {/* Story tab */}
+              <button
+                onClick={() => setActivePage(-1)}
+                className={`relative shrink-0 h-8 px-3 rounded-lg text-xs font-bold transition-all duration-200 flex items-center gap-1 ${
+                  activePage === -1
+                    ? "bg-action text-white shadow-sm scale-105"
+                    : "bg-muted/60 text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                <BookOpen className="w-3 h-3" />
+                Story
+                {storyDirty && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 border border-background" />
+                )}
               </button>
 
               {challenges.map((c, i) => {
@@ -394,8 +457,64 @@ export default function TeacherSession() {
             </div>
           )}
 
-          {/* Active compartment form — only this part changes */}
-          {activeChallenge ? (
+          {/* Active page form */}
+          {activePage === -1 ? (
+            // ── Story Page ──
+            <div className="px-4 pb-4 pt-2 space-y-3 animate-fade-in">
+              <div className="flex items-center gap-2 text-primary pt-1">
+                <BookOpen className="w-4 h-4" />
+                <span className="text-sm font-bold">Story</span>
+                <span className="text-xs text-muted-foreground ml-1">shown to students before Compartment 1</span>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Write the narrative students read first. It should contain the clue they need to open the physical padlock on Compartment 1.
+              </p>
+              <label className="block text-xs">
+                <span className="font-semibold text-primary">Story Text</span>
+                <textarea
+                  className="field-input mt-1 min-h-[240px] text-sm"
+                  placeholder="Write the story here…"
+                  value={localStoryText}
+                  onChange={(e) => { setLocalStoryText(e.target.value); setStoryDirty(true); }}
+                />
+              </label>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => saveStory(localStoryText)}
+                  disabled={storySaving || !storyDirty}
+                  className="flex-1 btn-primary flex items-center justify-center gap-2 text-sm disabled:opacity-60"
+                >
+                  <Save className="w-4 h-4" />
+                  {storySaving ? "Saving…" : storyDirty ? "Save Story" : "Saved"}
+                </button>
+                <button
+                  onClick={() => setActivePage(0)}
+                  disabled={challenges.length === 0}
+                  className="w-10 h-10 flex items-center justify-center rounded-xl border-2 border-border text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
+                  title="Go to Compartment 1"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Page indicator */}
+              <div className="flex justify-center gap-1.5 pt-1">
+                {/* Story dot */}
+                <button
+                  onClick={() => setActivePage(-1)}
+                  className="transition-all duration-200 rounded-full w-5 h-1.5 bg-action"
+                />
+                {challenges.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setActivePage(i)}
+                    className="transition-all duration-200 rounded-full w-1.5 h-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60"
+                  />
+                ))}
+              </div>
+            </div>
+          ) : activeChallenge ? (
             <div key={activeChallenge.id} className="px-4 pb-4 pt-2 space-y-3 animate-fade-in">
 
               {/* Compartment label + type selector */}
@@ -415,18 +534,6 @@ export default function TeacherSession() {
                   <option value="final_riddle">Riddle</option>
                 </select>
               </div>
-
-              {/* Story text — only for level 1 */}
-              {activeChallenge.level === 1 && (
-                <label className="block text-xs">
-                  <span className="font-semibold text-primary">Story Text</span>
-                  <textarea
-                    className="field-input mt-1 min-h-[160px] sm:min-h-[200px] md:min-h-[240px] text-sm"
-                    value={activeChallenge.story_text || ""}
-                    onChange={(e) => updateChallenge(activeChallenge.id, { story_text: e.target.value })}
-                  />
-                </label>
-              )}
 
               {/* Question / Prompt - single field for sequence/final_riddle/multiple_choice */}
               {(activeChallenge.type === "sequence" || activeChallenge.type === "final_riddle" || activeChallenge.type === "multiple_choice") && (
@@ -723,7 +830,7 @@ export default function TeacherSession() {
                 </button>
                 {/* Quick prev/next nav */}
                 <button
-                  onClick={() => setActivePage((p) => Math.max(0, p - 1))}
+                  onClick={() => setActivePage((p) => Math.max(-1, p - 1))}
                   disabled={activePage === 0}
                   className="w-10 h-10 flex items-center justify-center rounded-xl border-2 border-border text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
                 >
@@ -740,6 +847,11 @@ export default function TeacherSession() {
 
               {/* Page indicator */}
               <div className="flex justify-center gap-1.5 pt-1">
+                {/* Story dot */}
+                <button
+                  onClick={() => setActivePage(-1)}
+                  className="transition-all duration-200 rounded-full w-1.5 h-1.5 bg-muted-foreground/30 hover:bg-muted-foreground/60"
+                />
                 {challenges.map((_, i) => (
                   <button
                     key={i}
