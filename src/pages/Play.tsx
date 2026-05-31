@@ -369,14 +369,19 @@ export default function Play() {
     setShowScanner(false);
     try {
       const url = new URL(text, window.location.origin);
-      const expected = `/play/${groupId}/scan`;
-      if (!url.pathname.startsWith(`/play/${groupId}`)) {
-        toast.error("This QR code is for a different group.");
+      const fromLevel = parseInt(url.searchParams.get("from") || "0", 10);
+
+      // Accept session-level QR: /session/<sessionId>/scan?from=<n>
+      const isSessionQr = url.pathname.startsWith("/session/") && url.pathname.endsWith("/scan");
+      // Accept legacy group-level QR: /play/<groupId>/scan?from=<n>
+      const isGroupQr = url.pathname.startsWith(`/play/${groupId}`);
+
+      if (!isSessionQr && !isGroupQr) {
+        toast.error("This QR code is not valid for this session.");
         return;
       }
-      const fromLevel = parseInt(url.searchParams.get("from") || "0", 10);
       if (fromLevel !== currentLevel) {
-        toast.error("This QR code is for a different compartment.");
+        toast.error(`Wrong compartment — you're on Compartment ${currentLevel}, not ${fromLevel}.`);
         return;
       }
       advanceLevel();
