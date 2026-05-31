@@ -21,7 +21,7 @@ export const DEFAULT_CHALLENGES = [
       "Arrange these events in the correct order. Use the order to unlock Compartment 2.\n\n1. She reads the message\n2. She understands the meaning\n3. Mia finds the note\n4. She sees the numbers\n\nEnter the 4-digit code (the order numbers).",
     correct_answer_code: "3142",
     compartment_code: "3142",
-    reveal_message: "Code Accepted! Open Physical Compartment 1. Scan the QR code inside to continue.",
+    reveal_message: "Code Accepted! Open Physical Compartment 2. Scan the QR code inside to continue.",
     options: null,
     keywords: null,
   },
@@ -33,7 +33,7 @@ export const DEFAULT_CHALLENGES = [
     correct_answer_code: null,
     keywords: ["warn", "warning", "truth", "listen"],
     compartment_code: "2539",
-    reveal_message: "Great answer! Compartment 2 unlocked. Code for next padlock: 2 5 3 9.",
+    reveal_message: "Great answer! Compartment 3 unlocked. Code for next padlock: 2 5 3 9.",
     options: null,
   },
   {
@@ -58,8 +58,8 @@ export const DEFAULT_CHALLENGES = [
       "Reflect on the lesson of the story. Why does the message matter? Mention 'truth' and the importance of listening to warnings.",
     correct_answer_code: null,
     keywords: ["truth", "listen", "warning", "matter"],
-    compartment_code: "497",
-    reveal_message: "Beautiful reflection! Final code: 4 9 7.",
+    compartment_code: "4971",
+    reveal_message: "Beautiful reflection! Final code: 4 9 7 1.",
     options: null,
   },
   {

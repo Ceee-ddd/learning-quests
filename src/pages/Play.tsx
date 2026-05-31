@@ -28,6 +28,24 @@ export default function Play() {
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  // "story" phase shown once at the very start (before compartment 1 is opened)
+  // "playing" phase shows the challenge for the current level
+  const [gamePhase, setGamePhase] = useState<"story" | "playing">("story");
+
+  // When challenges load, skip story phase if there's no story text
+  useEffect(() => {
+    if (challenges.length > 0) {
+      const hasStory = !!challenges.find((c) => c.level === 1)?.story_text;
+      if (!hasStory) setGamePhase("playing");
+    }
+  }, [challenges]);
+
+  // If a student reconnects and is already past level 1, skip story phase
+  useEffect(() => {
+    if (group && (group.current_level ?? 1) > 1) {
+      setGamePhase("playing");
+    }
+  }, [group?.current_level]);
   const [strikes, setStrikes] = useState(0);          // wrong answers in current tier
   const [cooldownTier, setCooldownTier] = useState(0); // how many cooldowns have fired
   const [cooldownUntil, setCooldownUntil] = useState<number>(0);
@@ -380,6 +398,20 @@ export default function Play() {
         toast.error("This QR code is not valid for this session.");
         return;
       }
+
+      // During the story phase, scanning Compartment 1's QR transitions into the challenge
+      // (the group stays on level 1 — we're just revealing the question now)
+      if (gamePhase === "story") {
+        if (fromLevel !== 1) {
+          toast.error("That's not the Compartment 1 QR. Please scan the QR inside Compartment 1.");
+          return;
+        }
+        setGamePhase("playing");
+        toast.success("Compartment 1 opened! Here's your challenge.");
+        return;
+      }
+
+      // Normal playing phase: scanning the QR inside the current compartment advances to next level
       if (fromLevel !== currentLevel) {
         toast.error(`Wrong compartment — you're on Compartment ${currentLevel}, not ${fromLevel}.`);
         return;
@@ -390,26 +422,61 @@ export default function Play() {
     }
   }
 
-  // Level 1 shows story first
+  // ── Story phase: shown once at the very start, before Compartment 1 is opened ──
+  const storyText = challenges.find((c) => c.level === 1)?.story_text;
+  if (gamePhase === "story" && storyText) {
+    return (
+      <div className="app-shell pb-12">
+        <AppHeader subtitle={`Group: ${group.group_name}`} />
+        <div className="px-4 space-y-4">
+
+          <div className="app-card space-y-3 animate-pop-in">
+            <div className="flex items-center gap-2 text-primary">
+              <BookOpen className="w-5 h-5" />
+              <h2 className="text-lg font-bold">The Story</h2>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Read carefully — the story contains the clue to open Compartment 1.
+            </p>
+            <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90 max-h-[60vh] overflow-auto rounded-xl bg-muted/50 p-3">
+              {storyText}
+            </div>
+          </div>
+
+          <InfoBox icon={Key} label="Open Compartment 1" tone="warning">
+            Use the clue in the story above to open the physical padlock on Compartment 1.
+            Once it's open, scan the QR code inside to begin your first challenge.
+          </InfoBox>
+
+          <button
+            onClick={() => setShowScanner(true)}
+            className="btn-primary flex items-center justify-center gap-2"
+          >
+            <ScanLine className="w-5 h-5" /> Scan Compartment 1 QR
+          </button>
+
+          {/* Teacher bypass */}
+          <button
+            onClick={() => setGamePhase("playing")}
+            className="btn-outline flex items-center justify-center gap-2"
+          >
+            <BookOpen className="w-4 h-4" /> Skip Scan (Teacher use only)
+          </button>
+        </div>
+
+        {showScanner && <QRScanner onResult={handleScan} onClose={() => setShowScanner(false)} />}
+      </div>
+    );
+  }
+
+  // ── Playing phase ──
   return (
     <div className="app-shell pb-12">
       <AppHeader subtitle={`Group: ${group.group_name} · Compartment ${currentLevel}/5`} />
       <div className="px-4 space-y-4">
 
-        {currentLevel === 1 && challenges.find((c) => c.level === 1)?.story_text && (
-          <div className="app-card space-y-3">
-            <h2 className="text-lg font-bold text-primary">The Last Message of Room 407</h2>
-            <p className="text-sm text-muted-foreground">Read the story carefully. You will need details from it to solve the compartments.</p>
-            <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/90 max-h-72 overflow-auto rounded-xl bg-muted/50 p-3">
-              {challenges.find((c) => c.level === 1)?.story_text}
-            </div>
-          </div>
-        )}
-
         <InfoBox icon={Key} label={`Compartment ${currentLevel} Padlock`} tone="warning">
-          {currentLevel === 1
-            ? `Open Compartment 1 with the code your teacher provided. Scan the QR inside to begin.`
-            : `Use the revealed code to open Compartment ${currentLevel}. Scan the QR inside.`}
+          {`Use the revealed code to open Compartment ${currentLevel}. Scan the QR inside.`}
         </InfoBox>
 
         <div className="app-card space-y-3 animate-pop-in">
