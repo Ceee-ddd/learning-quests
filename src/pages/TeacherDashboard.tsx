@@ -335,36 +335,81 @@ export default function TeacherDashboard() {
       .select("id")
       .eq("session_id", sessionId);
 
-    // 3. For each group, randomly pick one question index per compartment level.
-    //    "Question count" = number of sub-questions in the options/keywords array.
-    //    Falls back to 1 (the only / whole challenge) if the format is flat/single.
-    function questionCount(ch: any): number {
-      if (!ch) return 1;
+    // 3. For each group, randomly pick N question indices per compartment level,
+    //    where N = display_count set by the teacher (defaults to 1).
+    //    The assignment is stored as:
+    //      single:   { "1": 2 }          → one index (backwards-compat)
+    //      multiple: { "1": [0, 2] }     → array of indices
+    function poolInfo(ch: any): { count: number; displayCount: number } {
+      if (!ch) return { count: 1, displayCount: 1 };
+
       if (ch.type === "sequence" || ch.type === "final_riddle") {
-        // Multi-variant pool stored in options as [{question_text, correct_answer_code}]
-        const pool = (ch.options as any[]) || [];
-        if (pool.length > 0 && "correct_answer_code" in pool[0]) return pool.length;
-        return 1;
+        const opts = ch.options;
+        // New wrapped format: { variants: [...], display_count: N }
+        if (opts && !Array.isArray(opts) && "variants" in opts) {
+          const variants = (opts.variants as any[]) || [];
+          return { count: variants.length, displayCount: opts.display_count ?? 1 };
+        }
+        // Legacy flat pool: [{question_text, correct_answer_code}]
+        if (Array.isArray(opts) && opts.length > 0 && "correct_answer_code" in opts[0]) {
+          return { count: opts.length, displayCount: 1 };
+        }
+        return { count: 1, displayCount: 1 };
       }
+
       if (ch.type === "multiple_choice") {
-        const opts = (ch.options as any[]) || [];
-        if (opts.length > 0 && typeof opts[0] === "object" && "choices" in opts[0]) return opts.length;
-        return 1;
+        const opts = ch.options;
+        // New wrapped format: { questions: [...], display_count: N }
+        if (opts && !Array.isArray(opts) && "questions" in opts) {
+          const qs = (opts.questions as any[]) || [];
+          return { count: qs.length, displayCount: opts.display_count ?? 1 };
+        }
+        // Legacy multi-Q: [{text, choices:[]}]
+        if (Array.isArray(opts) && opts.length > 0 && "choices" in opts[0]) {
+          return { count: opts.length, displayCount: 1 };
+        }
+        return { count: 1, displayCount: 1 };
       }
+
       if (ch.type === "short_answer" || ch.type === "long_text") {
-        const raw = (ch.keywords as any[]) || [];
-        if (raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0]) return raw.length;
-        return 1;
+        const raw = ch.keywords;
+        // New wrapped format: { questions: [...], display_count: N }
+        if (raw && !Array.isArray(raw) && "questions" in raw) {
+          const qs = (raw.questions as any[]) || [];
+          return { count: qs.length, displayCount: raw.display_count ?? 1 };
+        }
+        // Legacy multi-Q: [{text, keywords:[]}]
+        if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0]) {
+          return { count: raw.length, displayCount: 1 };
+        }
+        return { count: 1, displayCount: 1 };
       }
-      return 1;
+
+      return { count: 1, displayCount: 1 };
+    }
+
+    /** Fisher-Yates shuffle, returns first `n` elements */
+    function pickRandom(count: number, pick: number): number[] {
+      const indices = Array.from({ length: count }, (_, i) => i);
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+      return indices.slice(0, Math.min(pick, count));
     }
 
     if (sessionGroups && sessionGroups.length > 0 && challenges && challenges.length > 0) {
       const updates = sessionGroups.map((g) => {
-        const assignments: Record<string, number> = {};
+        const assignments: Record<string, number | number[]> = {};
         challenges.forEach((ch) => {
-          const count = questionCount(ch);
-          assignments[String(ch.level)] = Math.floor(Math.random() * count);
+          const { count, displayCount } = poolInfo(ch);
+          if (displayCount <= 1) {
+            // Single assignment — backwards-compatible scalar
+            assignments[String(ch.level)] = Math.floor(Math.random() * count);
+          } else {
+            // Multiple assignment — array of indices
+            assignments[String(ch.level)] = pickRandom(count, displayCount);
+          }
         });
         return supabase
           .from("groups")

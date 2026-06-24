@@ -5,7 +5,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { AppHeader } from "@/components/AppHeader";
-import { ArrowLeft, Save, ChevronDown, ChevronUp, Download, Plus, Trash2, ChevronLeft, ChevronRight, X, BookOpen } from "lucide-react";
+import { ArrowLeft, Save, ChevronDown, ChevronUp, Download, Plus, Trash2, ChevronLeft, ChevronRight, X, BookOpen, Timer } from "lucide-react";
 import { toast } from "sonner";
 
 // Inject print styles once
@@ -82,6 +82,7 @@ function defaultChallenge(sessionId: string, level: number) {
     reveal_message: "",
     keywords: [],
     options: [],
+    time_limit_seconds: null,
   };
 }
 
@@ -155,6 +156,7 @@ export default function TeacherSession() {
       keywords: c.keywords,
       options: c.options,
       type: c.type,
+      time_limit_seconds: c.time_limit_seconds ?? null,
     }).eq("id", c.id);
     setSaving(false);
     if (error) toast.error(error.message);
@@ -539,50 +541,50 @@ export default function TeacherSession() {
                 </select>
               </div>
 
-              {/* Question / Prompt - single field for multiple_choice */}
-              {activeChallenge.type === "multiple_choice" && (
-                <label className="block text-xs">
-                  <span className="font-semibold text-primary">Question / Prompt</span>
-                  <textarea
-                    className="field-input mt-1 min-h-[140px] sm:min-h-[160px] md:min-h-[200px] text-sm"
-                    value={activeChallenge.question_text || ""}
-                    onChange={(e) => updateChallenge(activeChallenge.id, { question_text: e.target.value })}
-                  />
-                </label>
-              )}
+
 
               {/* Sequence / Riddle multi-variant pool editor */}
               {(activeChallenge.type === "sequence" || activeChallenge.type === "final_riddle") && (() => {
                 type SeqVariant = { question_text: string; correct_answer_code: string };
-                const rawOpts: any[] = activeChallenge.options || [];
-                const isPool = rawOpts.length > 0 && "correct_answer_code" in rawOpts[0];
+                const rawOpts: any = activeChallenge.options;
 
-                // Seed from top-level fields on first render if no pool yet
-                const variants: SeqVariant[] = isPool
+                // New wrapped format: { variants: SeqVariant[], display_count: number }
+                // Legacy flat format: SeqVariant[] (array directly)
+                const isWrapped = rawOpts && !Array.isArray(rawOpts) && "variants" in rawOpts;
+                const isLegacyPool = Array.isArray(rawOpts) && rawOpts.length > 0 && "correct_answer_code" in rawOpts[0];
+
+                const variants: SeqVariant[] = isWrapped
+                  ? (rawOpts.variants as SeqVariant[])
+                  : isLegacyPool
                   ? (rawOpts as SeqVariant[])
                   : [{ question_text: activeChallenge.question_text || "", correct_answer_code: activeChallenge.correct_answer_code || "" }];
 
-                function saveVariants(next: SeqVariant[]) {
-                  // Keep top-level fields in sync with variant[0] for backwards-compat
+                const displayCount: number = isWrapped
+                  ? (rawOpts.display_count ?? 1)
+                  : 1;
+
+                function savePool(nextVariants: SeqVariant[], nextDisplayCount: number) {
+                  const clampedCount = Math.min(Math.max(1, nextDisplayCount), nextVariants.length);
                   updateChallenge(activeChallenge.id, {
-                    options: next,
-                    question_text: next[0]?.question_text ?? "",
-                    correct_answer_code: next[0]?.correct_answer_code ?? "",
+                    options: { variants: nextVariants, display_count: clampedCount },
+                    question_text: nextVariants[0]?.question_text ?? "",
+                    correct_answer_code: nextVariants[0]?.correct_answer_code ?? "",
                   });
                 }
 
                 function updateVariant(vi: number, patch: Partial<SeqVariant>) {
                   const next = variants.map((v, i) => i === vi ? { ...v, ...patch } : v);
-                  saveVariants(next);
+                  savePool(next, displayCount);
                 }
 
                 function addVariant() {
-                  saveVariants([...variants, { question_text: "", correct_answer_code: "" }]);
+                  savePool([...variants, { question_text: "", correct_answer_code: "" }], displayCount);
                 }
 
                 function removeVariant(vi: number) {
                   if (variants.length <= 1) return;
-                  saveVariants(variants.filter((_, i) => i !== vi));
+                  const next = variants.filter((_, i) => i !== vi);
+                  savePool(next, Math.min(displayCount, next.length));
                 }
 
                 const typeLabel = activeChallenge.type === "final_riddle" ? "Riddle" : "Sequence";
@@ -594,14 +596,35 @@ export default function TeacherSession() {
                         {typeLabel} Pool
                         <span className="ml-1.5 font-normal text-muted-foreground">({variants.length} variant{variants.length !== 1 ? "s" : ""})</span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={addVariant}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
-                      >
-                        <Plus className="w-3 h-3" /> Add {typeLabel}
-                      </button>
                     </div>
+
+                    {/* Display count control — only shown when pool has >1 variant */}
+                    {variants.length > 1 && (
+                      <div className="flex items-center gap-3 rounded-xl bg-muted/30 border border-border px-3 py-2.5">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-semibold text-primary">Questions shown per group</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            Each group gets {displayCount === variants.length ? "all" : displayCount} random variant{displayCount !== 1 ? "s" : ""} from this pool
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => savePool(variants, Math.max(1, displayCount - 1))}
+                            disabled={displayCount <= 1}
+                            className="w-7 h-7 rounded-lg border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
+                          >−</button>
+                          <span className="w-8 text-center text-sm font-bold text-primary tabular-nums">{displayCount}</span>
+                          <button
+                            type="button"
+                            onClick={() => savePool(variants, Math.min(variants.length, displayCount + 1))}
+                            disabled={displayCount >= variants.length}
+                            className="w-7 h-7 rounded-lg border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
+                          >+</button>
+                          <span className="text-[10px] text-muted-foreground">/ {variants.length}</span>
+                        </div>
+                      </div>
+                    )}
 
                     {variants.map((v, vi) => (
                       <div key={vi} className="rounded-xl border-2 border-border bg-muted/10 p-3 space-y-2">
@@ -639,56 +662,99 @@ export default function TeacherSession() {
                         </label>
                       </div>
                     ))}
+
+                    <button
+                      type="button"
+                      onClick={addVariant}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                    >
+                      <Plus className="w-3 h-3" /> Add {typeLabel}
+                    </button>
                   </div>
                 );
               })()}
 
               {/* Multi-Question editor for short_answer and long_text */}
               {(activeChallenge.type === "short_answer" || activeChallenge.type === "long_text") && (() => {
-                // keywords stored as: string[] (legacy single Q) OR {text,keywords[]}[] (multi-Q)
-                const raw: any = activeChallenge.keywords || [];
-                const isMultiQ = raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0];
+                // keywords stored as:
+                //   string[]                → legacy single Q
+                //   {text,keywords[]}[]     → legacy multi-Q (flat array)
+                //   { questions: {text,keywords[]}[], display_count: number } → new wrapped format
+                const raw: any = activeChallenge.keywords;
 
                 type SAQuestion = { text: string; keywords: string[] };
-                const questions: SAQuestion[] = isMultiQ
-                  ? (raw as SAQuestion[])
-                  : [{ text: activeChallenge.question_text || "", keywords: raw as string[] }];
+                const isWrapped = raw && !Array.isArray(raw) && "questions" in raw;
+                const isLegacyMultiQ = Array.isArray(raw) && raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0];
 
-                function save(next: SAQuestion[]) {
-                  updateChallenge(activeChallenge.id, { keywords: next });
+                const questions: SAQuestion[] = isWrapped
+                  ? (raw.questions as SAQuestion[])
+                  : isLegacyMultiQ
+                  ? (raw as SAQuestion[])
+                  : [{ text: activeChallenge.question_text || "", keywords: Array.isArray(raw) ? raw as string[] : [] }];
+
+                const displayCount: number = isWrapped ? (raw.display_count ?? 1) : 1;
+
+                function savePool(nextQs: SAQuestion[], nextCount: number) {
+                  const clampedCount = Math.min(Math.max(1, nextCount), nextQs.length);
+                  updateChallenge(activeChallenge.id, { keywords: { questions: nextQs, display_count: clampedCount } });
                 }
 
                 function updateQText(qi: number, text: string) {
-                  save(questions.map((q, i) => i === qi ? { ...q, text } : q));
+                  savePool(questions.map((q, i) => i === qi ? { ...q, text } : q), displayCount);
                 }
 
                 function updateKeywords(qi: number, val: string) {
-                  save(questions.map((q, i) =>
+                  savePool(questions.map((q, i) =>
                     i === qi ? { ...q, keywords: val.split(",").map((s: string) => s.trim()).filter(Boolean) } : q
-                  ));
+                  ), displayCount);
                 }
 
                 function addQuestion() {
-                  save([...questions, { text: "", keywords: [] }]);
+                  savePool([...questions, { text: "", keywords: [] }], displayCount);
                 }
 
                 function removeQuestion(qi: number) {
                   if (questions.length <= 1) return;
-                  save(questions.filter((_, i) => i !== qi));
+                  const next = questions.filter((_, i) => i !== qi);
+                  savePool(next, Math.min(displayCount, next.length));
                 }
 
                 return (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-primary">Questions</span>
-                      <button
-                        type="button"
-                        onClick={addQuestion}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
-                      >
-                        <Plus className="w-3 h-3" /> Add Question
-                      </button>
+                      <span className="text-xs font-semibold text-primary">
+                        Questions
+                        <span className="ml-1.5 font-normal text-muted-foreground">({questions.length} total)</span>
+                      </span>
                     </div>
+
+                    {/* Display count control — only shown when pool has >1 question */}
+                    {questions.length > 1 && (
+                      <div className="flex items-center gap-3 rounded-xl bg-muted/30 border border-border px-3 py-2.5">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-semibold text-primary">Questions shown per group</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            Each group gets {displayCount === questions.length ? "all" : displayCount} random question{displayCount !== 1 ? "s" : ""} from this pool
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => savePool(questions, Math.max(1, displayCount - 1))}
+                            disabled={displayCount <= 1}
+                            className="w-7 h-7 rounded-lg border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
+                          >−</button>
+                          <span className="w-8 text-center text-sm font-bold text-primary tabular-nums">{displayCount}</span>
+                          <button
+                            type="button"
+                            onClick={() => savePool(questions, Math.min(questions.length, displayCount + 1))}
+                            disabled={displayCount >= questions.length}
+                            className="w-7 h-7 rounded-lg border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
+                          >+</button>
+                          <span className="text-[10px] text-muted-foreground">/ {questions.length}</span>
+                        </div>
+                      </div>
+                    )}
 
                     {questions.map((q, qi) => (
                       <div key={qi} className="rounded-xl border-2 border-border bg-muted/10 p-3 space-y-2">
@@ -723,6 +789,14 @@ export default function TeacherSession() {
                         </div>
                       </div>
                     ))}
+
+                    <button
+                      type="button"
+                      onClick={addQuestion}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                    >
+                      <Plus className="w-3 h-3" /> Add Question
+                    </button>
                   </div>
                 );
               })()}
@@ -731,19 +805,29 @@ export default function TeacherSession() {
               {/* Multi-Question Multiple Choice Editor */}
               {activeChallenge.type === "multiple_choice" && (() => {
                 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-                const rawOpts: any[] = activeChallenge.options || [];
+                const rawOpts: any = activeChallenge.options;
 
-                // Detect format: new [{text, choices:[]}] vs legacy flat [{label,is_correct}]
-                const isMultiQ = rawOpts.length > 0 && "choices" in rawOpts[0];
+                // Detect format:
+                //   wrapped: { questions: [{text, choices:[]}], display_count: N }
+                //   legacy multi-Q: [{text, choices:[]}]  (array with choices)
+                //   legacy flat: [{label, is_correct}]
+                const isWrapped = rawOpts && !Array.isArray(rawOpts) && "questions" in rawOpts;
+                const rawArr: any[] = isWrapped ? rawOpts.questions : (Array.isArray(rawOpts) ? rawOpts : []);
+                const isLegacyMultiQ = rawArr.length > 0 && "choices" in rawArr[0];
 
                 type Choice = { label: string; is_correct: boolean };
                 type Question = { text: string; choices: Choice[] };
-                const questions: Question[] = isMultiQ
-                  ? (rawOpts as Question[])
-                  : [{ text: activeChallenge.question_text || "", choices: rawOpts as Choice[] }];
+                const questions: Question[] = isWrapped
+                  ? (rawOpts.questions as Question[])
+                  : isLegacyMultiQ
+                  ? (rawArr as Question[])
+                  : [{ text: activeChallenge.question_text || "", choices: rawArr as Choice[] }];
 
-                function save(next: Question[]) {
-                  updateChallenge(activeChallenge.id, { options: next });
+                const displayCount: number = isWrapped ? (rawOpts.display_count ?? 1) : 1;
+
+                function savePool(next: Question[], nextCount: number) {
+                  const clampedCount = Math.min(Math.max(1, nextCount), next.length);
+                  updateChallenge(activeChallenge.id, { options: { questions: next, display_count: clampedCount } });
                 }
 
                 function choiceText(label: string) {
@@ -751,45 +835,46 @@ export default function TeacherSession() {
                 }
 
                 function updateQText(qi: number, text: string) {
-                  save(questions.map((q, i) => i === qi ? { ...q, text } : q));
+                  savePool(questions.map((q, i) => i === qi ? { ...q, text } : q), displayCount);
                 }
 
                 function addQuestion() {
-                  save([...questions, { text: "", choices: [{ label: "A. ", is_correct: true }] }]);
+                  savePool([...questions, { text: "", choices: [{ label: "A. ", is_correct: true }] }], displayCount);
                 }
 
                 function removeQuestion(qi: number) {
                   if (questions.length <= 1) return;
-                  save(questions.filter((_, i) => i !== qi));
+                  const next = questions.filter((_, i) => i !== qi);
+                  savePool(next, Math.min(displayCount, next.length));
                 }
 
                 function updateChoiceText(qi: number, ci: number, text: string) {
                   const letter = LETTERS[ci] ?? String(ci + 1);
-                  save(questions.map((q, i) => i !== qi ? q : {
+                  savePool(questions.map((q, i) => i !== qi ? q : {
                     ...q,
                     choices: q.choices.map((ch, j) =>
                       j === ci ? { ...ch, label: `${letter}. ${text}` } : ch
                     ),
-                  }));
+                  }), displayCount);
                 }
 
                 function markCorrect(qi: number, ci: number) {
-                  save(questions.map((q, i) => i !== qi ? q : {
+                  savePool(questions.map((q, i) => i !== qi ? q : {
                     ...q,
                     choices: q.choices.map((ch, j) => ({ ...ch, is_correct: j === ci })),
-                  }));
+                  }), displayCount);
                 }
 
                 function addChoice(qi: number) {
-                  save(questions.map((q, i) => {
+                  savePool(questions.map((q, i) => {
                     if (i !== qi) return q;
                     const letter = LETTERS[q.choices.length] ?? String(q.choices.length + 1);
                     return { ...q, choices: [...q.choices, { label: `${letter}. `, is_correct: false }] };
-                  }));
+                  }), displayCount);
                 }
 
                 function removeChoice(qi: number, ci: number) {
-                  save(questions.map((q, i) => {
+                  savePool(questions.map((q, i) => {
                     if (i !== qi) return q;
                     if (q.choices.length <= 1) return q;
                     const filtered = q.choices.filter((_, j) => j !== ci);
@@ -798,21 +883,45 @@ export default function TeacherSession() {
                     }));
                     if (!relabeled.some((ch) => ch.is_correct)) relabeled[0].is_correct = true;
                     return { ...q, choices: relabeled };
-                  }));
+                  }), displayCount);
                 }
 
                 return (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-primary">Questions &amp; Choices</span>
-                      <button
-                        type="button"
-                        onClick={addQuestion}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
-                      >
-                        <Plus className="w-3 h-3" /> Add Question
-                      </button>
+                      <span className="text-xs font-semibold text-primary">
+                        Questions &amp; Choices
+                        <span className="ml-1.5 font-normal text-muted-foreground">({questions.length} total)</span>
+                      </span>
                     </div>
+
+                    {/* Display count control — only shown when pool has >1 question */}
+                    {questions.length > 1 && (
+                      <div className="flex items-center gap-3 rounded-xl bg-muted/30 border border-border px-3 py-2.5">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-semibold text-primary">Questions shown per group</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            Each group gets {displayCount === questions.length ? "all" : displayCount} random question{displayCount !== 1 ? "s" : ""} from this pool
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => savePool(questions, Math.max(1, displayCount - 1))}
+                            disabled={displayCount <= 1}
+                            className="w-7 h-7 rounded-lg border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
+                          >−</button>
+                          <span className="w-8 text-center text-sm font-bold text-primary tabular-nums">{displayCount}</span>
+                          <button
+                            type="button"
+                            onClick={() => savePool(questions, Math.min(questions.length, displayCount + 1))}
+                            disabled={displayCount >= questions.length}
+                            className="w-7 h-7 rounded-lg border border-border flex items-center justify-center text-sm font-bold text-muted-foreground hover:bg-muted disabled:opacity-30 transition"
+                          >+</button>
+                          <span className="text-[10px] text-muted-foreground">/ {questions.length}</span>
+                        </div>
+                      </div>
+                    )}
 
                     {questions.map((q, qi) => (
                       <div key={qi} className="rounded-xl border-2 border-border bg-muted/10 p-3 space-y-2">
@@ -882,6 +991,14 @@ export default function TeacherSession() {
                         </div>
                       </div>
                     ))}
+
+                    <button
+                      type="button"
+                      onClick={addQuestion}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                    >
+                      <Plus className="w-3 h-3" /> Add Question
+                    </button>
                   </div>
                 );
               })()}
@@ -903,6 +1020,83 @@ export default function TeacherSession() {
                   onChange={(e) => updateChallenge(activeChallenge.id, { reveal_message: e.target.value })}
                 />
               </label>
+
+              {/* ── Time Limit ── */}
+              {(() => {
+                const rawSecs: number | null = activeChallenge.time_limit_seconds ?? null;
+                const enabled = rawSecs !== null;
+                const totalSecs = rawSecs ?? 120;
+                const mins = Math.floor(totalSecs / 60);
+                const secs = totalSecs % 60;
+
+                function setLimit(m: number, s: number) {
+                  const total = Math.max(0, m * 60 + s);
+                  updateChallenge(activeChallenge.id, { time_limit_seconds: total === 0 ? null : total });
+                }
+
+                return (
+                  <div className="rounded-xl border-2 border-border bg-muted/10 p-3 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-primary">
+                        <Timer className="w-4 h-4" />
+                        <span className="text-xs font-semibold">Time Limit per Compartment</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => updateChallenge(activeChallenge.id, {
+                          time_limit_seconds: enabled ? null : 120,
+                        })}
+                        className={`relative w-10 h-5 rounded-full transition-colors ${enabled ? "bg-action" : "bg-muted-foreground/30"}`}
+                      >
+                        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${enabled ? "left-5" : "left-0.5"}`} />
+                      </button>
+                    </div>
+
+                    {enabled && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
+                          {/* Minutes */}
+                          <div className="flex flex-col items-center gap-0.5">
+                            <button type="button" onClick={() => setLimit(mins + 1, secs)}
+                              className="w-7 h-6 rounded border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition leading-none">▲</button>
+                            <span className="w-10 text-center text-xl font-bold text-primary tabular-nums">
+                              {String(mins).padStart(2, "0")}
+                            </span>
+                            <button type="button" onClick={() => setLimit(Math.max(0, mins - 1), secs)}
+                              disabled={mins === 0 && secs <= 10}
+                              className="w-7 h-6 rounded border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition leading-none disabled:opacity-30">▼</button>
+                          </div>
+                          <span className="text-xl font-bold text-primary mb-0.5">:</span>
+                          {/* Seconds */}
+                          <div className="flex flex-col items-center gap-0.5">
+                            <button type="button" onClick={() => {
+                              if (secs === 50) setLimit(mins + 1, 0);
+                              else setLimit(mins, secs + 10);
+                            }}
+                              className="w-7 h-6 rounded border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition leading-none">▲</button>
+                            <span className="w-10 text-center text-xl font-bold text-primary tabular-nums">
+                              {String(secs).padStart(2, "0")}
+                            </span>
+                            <button type="button" onClick={() => {
+                              if (secs === 0) { if (mins > 0) setLimit(mins - 1, 50); }
+                              else setLimit(mins, secs - 10);
+                            }}
+                              disabled={mins === 0 && secs <= 10}
+                              className="w-7 h-6 rounded border border-border text-xs font-bold text-muted-foreground hover:bg-muted transition leading-none disabled:opacity-30">▼</button>
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground leading-relaxed ml-1">
+                          Timer starts when<br />the group opens<br />this compartment
+                        </div>
+                      </div>
+                    )}
+
+                    {!enabled && (
+                      <p className="text-[10px] text-muted-foreground">No time limit — groups can take as long as they need.</p>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="flex items-center gap-2 pt-1">
                 <button

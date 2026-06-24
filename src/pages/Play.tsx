@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "@/components/AppHeader";
 import { InfoBox } from "@/components/InfoBox";
 import { QRScanner } from "@/components/QRScanner";
-import { BookOpen, Key, ScanLine, CheckCircle2, Puzzle, Home } from "lucide-react";
+import { BookOpen, Key, ScanLine, CheckCircle2, Puzzle, Home, Timer } from "lucide-react";
 import { toast } from "sonner";
 
 const STRIKES_PER_TIER = 3;       // wrong answers before a cooldown triggers
@@ -51,11 +51,22 @@ export default function Play() {
   const [cooldownUntil, setCooldownUntil] = useState<number>(0);
   const [now, setNow] = useState(Date.now());
 
+  // Per-compartment countdown timer
+  const [timeLimitExpiry, setTimeLimitExpiry] = useState<number | null>(null); // epoch ms when timer expires
+  const [timeExpired, setTimeExpired] = useState(false);
+
   // tick for cooldown countdown
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Start compartment timer when playing phase begins (or challenge changes) and a limit is set
+  useEffect(() => {
+    if (gamePhase !== "playing") return;
+    // challenge is not in scope here yet — resolved later via the useMemo.
+    // We trigger this from the challenge useMemo dependency via a separate effect below.
+  }, [gamePhase]);
 
   // Load group + challenges + session status
   useEffect(() => {
@@ -180,14 +191,21 @@ export default function Play() {
   }, [group?.session_id, groupId]);
 
   const currentLevel = group?.current_level ?? 1;
-  // Assigned question index for this group at the current level (0-based).
-  // Stored in group.question_assignments as { "1": 2, "2": 0, ... }
-  const assignedQuestionIndex: number = (() => {
+  // Assigned question index/indices for this group at the current level (0-based).
+  // Stored in group.question_assignments as:
+  //   scalar  { "1": 2 }       → single index (legacy / display_count = 1)
+  //   array   { "1": [0, 2] }  → multiple indices (display_count > 1)
+  const assignedQuestionIndices: number[] = (() => {
     const qa = group?.question_assignments;
-    if (!qa) return 0;
-    const idx = qa[String(currentLevel)];
-    return typeof idx === "number" ? idx : 0;
+    if (!qa) return [0];
+    const raw = qa[String(currentLevel)];
+    if (Array.isArray(raw)) return raw as number[];
+    if (typeof raw === "number") return [raw];
+    return [0];
   })();
+  // Backwards-compat: single index for code that still uses it
+  const assignedQuestionIndex = assignedQuestionIndices[0] ?? 0;
+
   // Enforce sequential
   useEffect(() => {
     if (group && requestedLevel && requestedLevel !== currentLevel) {
@@ -200,6 +218,29 @@ export default function Play() {
     [challenges, currentLevel]
   );
 
+  // Start the compartment countdown when entering playing phase with a time limit set
+  useEffect(() => {
+    if (gamePhase !== "playing") return;
+    if (!challenge) return;
+    const secs: number | null = challenge.time_limit_seconds ?? null;
+    if (!secs || secs <= 0) {
+      setTimeLimitExpiry(null);
+      setTimeExpired(false);
+      return;
+    }
+    // Only set expiry once per level (don't restart on re-renders)
+    setTimeLimitExpiry((prev) => prev ?? Date.now() + secs * 1000);
+  }, [gamePhase, challenge?.id]);
+
+  // Detect expiry each tick
+  useEffect(() => {
+    if (timeLimitExpiry === null || timeExpired || success) return;
+    if (now >= timeLimitExpiry) {
+      setTimeExpired(true);
+      toast.error("Time's up! Your attempt has been locked.");
+    }
+  }, [now, timeLimitExpiry, timeExpired, success]);
+
   // Reset per-challenge state when level changes
   useEffect(() => {
     setAnswer("");
@@ -210,6 +251,8 @@ export default function Play() {
     setStrikes(0);
     setCooldownTier(0);
     setCooldownUntil(0);
+    setTimeLimitExpiry(null);
+    setTimeExpired(false);
   }, [currentLevel]);
 
   // Session status gate — shown before the main game UI
@@ -278,76 +321,122 @@ export default function Play() {
   const cooldownLeft = Math.max(0, Math.ceil((cooldownUntil - now) / 1000));
   const onCooldown = cooldownLeft > 0;
 
-  // Detect whether options is the new multi-question format or legacy flat choices
-  function isMQFormat(opts: any[]): boolean {
-    return opts.length > 0 && typeof opts[0] === "object" && "choices" in opts[0];
+  // Countdown timer
+  const timeLeft = timeLimitExpiry !== null ? Math.max(0, Math.ceil((timeLimitExpiry - now) / 1000)) : null;
+  const totalTime = challenge?.time_limit_seconds ?? null;
+  const timerProgress = (timeLeft !== null && totalTime) ? timeLeft / totalTime : 1;
+  const timerUrgent = timeLeft !== null && timeLeft <= 30;
+
+  // ── Pool resolution helpers ──────────────────────────────────────────────────
+  // Unwrap the new { variants/questions, display_count } wrapper or fall back to legacy arrays.
+
+  function getSeqVariants(c: any): { question_text: string; correct_answer_code: string }[] {
+    const opts = c.options;
+    if (opts && !Array.isArray(opts) && "variants" in opts) return opts.variants || [];
+    if (Array.isArray(opts) && opts.length > 0 && "correct_answer_code" in opts[0]) return opts;
+    return [];
   }
 
+  function getMCQuestions(c: any): { text: string; choices: { label: string; is_correct: boolean }[] }[] {
+    const opts = c.options;
+    if (opts && !Array.isArray(opts) && "questions" in opts) return opts.questions || [];
+    if (Array.isArray(opts) && opts.length > 0 && "choices" in opts[0]) return opts;
+    return [];
+  }
+
+  function getSAQuestions(c: any): { text: string; keywords: string[] }[] {
+    const raw = c.keywords;
+    if (raw && !Array.isArray(raw) && "questions" in raw) return raw.questions || [];
+    if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0]) return raw;
+    return [];
+  }
+
+  // ── Validation ───────────────────────────────────────────────────────────────
   function validate(input: string): boolean {
     const c = challenge;
     const ans = input.trim().toLowerCase();
+
     if (c.type === "sequence" || c.type === "final_riddle") {
-      // Multi-variant pool: pick the assigned variant's answer code
-      const pool: any[] = (c.options as any[]) || [];
-      const isPool = pool.length > 0 && "correct_answer_code" in pool[0];
-      const correctCode = isPool
-        ? (pool[assignedQuestionIndex] ?? pool[0])?.correct_answer_code ?? ""
-        : c.correct_answer_code ?? "";
-      return ans === correctCode.trim().toLowerCase();
+      const variants = getSeqVariants(c);
+      if (variants.length > 0) {
+        // Single assigned variant (sequence always 1-at-a-time)
+        const variant = variants[assignedQuestionIndex] ?? variants[0];
+        return ans === (variant?.correct_answer_code ?? "").trim().toLowerCase();
+      }
+      return ans === (c.correct_answer_code ?? "").trim().toLowerCase();
     }
+
     if (c.type === "multiple_choice") {
-      const opts = (c.options as any[]) || [];
-      if (isMQFormat(opts)) {
-        // Randomized: only the single assigned question needs to be answered correctly
-        const assignedQ = opts[assignedQuestionIndex] ?? opts[0];
-        if (!assignedQ) return false;
-        const chosen = mcAnswers[0];
-        if (!chosen) return false;
-        const match = (assignedQ.choices as any[])?.find((ch: any) => ch.label.startsWith(chosen));
-        return !!match?.is_correct;
+      const mcQs = getMCQuestions(c);
+      if (mcQs.length > 0) {
+        // All assigned questions must be answered correctly
+        return assignedQuestionIndices.every((idx) => {
+          const q = mcQs[idx];
+          if (!q) return false;
+          const chosen = mcAnswers[idx];
+          if (!chosen) return false;
+          const match = q.choices.find((ch) => ch.label.startsWith(chosen));
+          return !!match?.is_correct;
+        });
       }
       // Legacy single-question flat format
+      const opts = (c.options as any[]) || [];
       const opt = opts.find((o: any) => o.label.startsWith(input));
       return !!opt?.is_correct;
     }
+
     if (c.type === "short_answer" || c.type === "long_text") {
-      const raw: any = c.keywords || [];
-      const isSAMultiQ = raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0];
-      if (isSAMultiQ) {
-        // Randomized: only the single assigned question needs to be answered
-        const assignedQ = raw[assignedQuestionIndex] ?? raw[0];
-        if (!assignedQ) return false;
-        const ans_i = (saAnswers[0] || "").trim().toLowerCase();
-        if (assignedQ.keywords.length === 0) return ans_i.length > 5;
-        return assignedQ.keywords.some((k: string) => ans_i.includes(k.toLowerCase()));
+      const saQs = getSAQuestions(c);
+      if (saQs.length > 0) {
+        // All assigned questions must be answered
+        return assignedQuestionIndices.every((idx) => {
+          const q = saQs[idx];
+          if (!q) return false;
+          const a = (saAnswers[idx] || "").trim().toLowerCase();
+          if (q.keywords.length === 0) return a.length > 5;
+          return q.keywords.some((k: string) => a.includes(k.toLowerCase()));
+        });
       }
       // Legacy single-question
-      const kws: string[] = (raw as string[]);
+      const kws: string[] = Array.isArray(c.keywords) ? (c.keywords as string[]) : [];
       if (kws.length === 0) return ans.length > 5;
       return kws.some((k) => ans.includes(k.toLowerCase()));
     }
     return false;
   }
 
+
   async function submit() {
     if (sessionStatus !== "active") return toast.error("The session has ended.");
     if (onCooldown) return;
-    const opts = (challenge.options as any[]) || [];
-    const isMultiQ = challenge.type === "multiple_choice" && isMQFormat(opts);
-    const rawKw: any = challenge.keywords || [];
-    const isSAMultiQ = (challenge.type === "short_answer" || challenge.type === "long_text")
-      && rawKw.length > 0 && typeof rawKw[0] === "object" && "text" in rawKw[0];
-    // For randomized formats, we only show 1 question (stored at index 0 in state maps)
-    if (isMultiQ && !mcAnswers[0]) return toast.error("Please select an answer first.");
-    if (isSAMultiQ && !(saAnswers[0] || "").trim()) return toast.error("Please write an answer first.");
-    const input = isMultiQ ? "" : isSAMultiQ ? "" : challenge.type === "multiple_choice" ? chosenOption : answer;
-    if (!isMultiQ && !isSAMultiQ && !input.trim()) return toast.error("Enter an answer first");
+    if (timeExpired) return toast.error("Time's up — this compartment is locked.");
+
+    const mcQs = getMCQuestions(challenge);
+    const saQs = getSAQuestions(challenge);
+    const isMultiMC = mcQs.length > 0;
+    const isMultiSA = saQs.length > 0;
+
+    // Guard: all assigned questions must have an answer before submitting
+    if (isMultiMC) {
+      const missing = assignedQuestionIndices.filter((idx) => !mcAnswers[idx]);
+      if (missing.length > 0) return toast.error(`Please answer all ${assignedQuestionIndices.length} question${assignedQuestionIndices.length !== 1 ? "s" : ""} before submitting.`);
+    }
+    if (isMultiSA) {
+      const missing = assignedQuestionIndices.filter((idx) => !(saAnswers[idx] || "").trim());
+      if (missing.length > 0) return toast.error(`Please answer all ${assignedQuestionIndices.length} question${assignedQuestionIndices.length !== 1 ? "s" : ""} before submitting.`);
+    }
+
+    // Legacy flat MC / sequence / short-answer: need a non-empty text input
+    const isLegacyMC = !isMultiMC && challenge.type === "multiple_choice";
+    const input = isMultiMC ? "" : isMultiSA ? "" : isLegacyMC ? chosenOption : answer;
+    if (!isMultiMC && !isMultiSA && !input.trim()) return toast.error("Enter an answer first");
 
     setBusy(true);
     const ok = validate(input);
     await supabase.from("submissions").insert({
       group_id: groupId!, challenge_level: currentLevel,
-      submitted_answer: isMultiQ ? JSON.stringify(mcAnswers) : isSAMultiQ ? JSON.stringify(saAnswers) : input, is_correct: ok,
+      submitted_answer: isMultiMC ? JSON.stringify(mcAnswers) : isMultiSA ? JSON.stringify(saAnswers) : input,
+      is_correct: ok,
     });
 
     if (!group.start_time) {
@@ -373,6 +462,7 @@ export default function Play() {
       }
     }
     setBusy(false);
+
   }
 
   async function advanceLevel() {
@@ -483,99 +573,180 @@ export default function Play() {
         </InfoBox>
 
         <div className="app-card space-y-3 animate-pop-in">
-          <div className="flex items-center gap-2 text-primary">
-            <Puzzle className="w-5 h-5" />
-            <h3 className="font-bold">Compartment {currentLevel} Challenge</h3>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-primary">
+              <Puzzle className="w-5 h-5" />
+              <h3 className="font-bold">Compartment {currentLevel} Challenge</h3>
+            </div>
+
+            {/* Countdown timer badge — only shown when a limit is set */}
+            {timeLeft !== null && !success && (
+              <div className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold tabular-nums transition-colors ${
+                timeExpired
+                  ? "bg-destructive/15 text-destructive"
+                  : timerUrgent
+                  ? "bg-destructive/10 text-destructive animate-pulse"
+                  : "bg-muted text-foreground"
+              }`}>
+                <Timer className="w-3.5 h-3.5 shrink-0" />
+                {timeExpired
+                  ? "Time's up"
+                  : `${String(Math.floor(timeLeft / 60)).padStart(2, "0")}:${String(timeLeft % 60).padStart(2, "0")}`}
+              </div>
+            )}
           </div>
-          {(() => {
-            // For sequence/riddle with a multi-variant pool, show the assigned variant's prompt
-            if (challenge.type === "sequence" || challenge.type === "final_riddle") {
-              const pool: any[] = (challenge.options as any[]) || [];
-              const isPool = pool.length > 0 && "correct_answer_code" in pool[0];
-              if (isPool) {
-                const variant = pool[assignedQuestionIndex] ?? pool[0];
-                return <p className="text-sm whitespace-pre-wrap text-foreground/90">{variant?.question_text || ""}</p>;
-              }
-            }
-            return <p className="text-sm whitespace-pre-wrap text-foreground/90">{challenge.question_text}</p>;
+
+          {/* Timer progress bar */}
+          {timeLeft !== null && !success && (
+            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden -mt-1">
+              <div
+                className={`h-full rounded-full transition-all duration-1000 ${
+                  timeExpired ? "bg-destructive" : timerUrgent ? "bg-destructive" : "bg-action"
+                }`}
+                style={{ width: `${Math.round(timerProgress * 100)}%` }}
+              />
+            </div>
+          )}
+
+          {/* Time expired overlay */}
+          {timeExpired && !success && (
+            <div className="rounded-xl bg-destructive/10 border-2 border-destructive/40 p-3 text-center space-y-1">
+              <p className="text-sm font-bold text-destructive">⏰ Time's up!</p>
+              <p className="text-xs text-muted-foreground">Your answer for this compartment has been locked.</p>
+            </div>
+          )}
+
+          {/* ── Sequence / Riddle: show assigned variant's prompt + single answer input ── */}
+          {(challenge.type === "sequence" || challenge.type === "final_riddle") && (() => {
+            const variants = getSeqVariants(challenge);
+            const prompt = variants.length > 0
+              ? (variants[assignedQuestionIndex] ?? variants[0])?.question_text ?? ""
+              : challenge.question_text ?? "";
+            return (
+              <div className="space-y-3">
+                <p className="text-sm whitespace-pre-wrap text-foreground/90">{prompt}</p>
+                {!success && (
+                  <input
+                    className="field-input"
+                    placeholder="Enter your answer here"
+                    value={answer}
+                    maxLength={50}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    inputMode="numeric"
+                  />
+                )}
+              </div>
+            );
           })()}
 
-          {!success && (
-            <>
-              {challenge.type === "multiple_choice" ? (() => {
-                const opts = (challenge.options as any[]) || [];
-                const multiQ = isMQFormat(opts);
-                if (multiQ) {
-                  // Show only the single randomly-assigned question for this group
-                  const q = opts[assignedQuestionIndex] ?? opts[0];
-                  if (!q) return null;
-                  return (
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-foreground/90">{q.text}</p>
-                      <div className="space-y-1.5">
-                        {(q.choices as any[]).map((ch: any) => {
-                          const letter = ch.label.charAt(0);
-                          const sel = mcAnswers[0] === letter;
-                          return (
-                            <button
-                              key={ch.label}
-                              type="button"
-                              onClick={() => setMcAnswers({ 0: letter })}
-                              className={`w-full text-left rounded-xl px-4 py-2.5 border-2 transition ${
-                                sel ? "border-action bg-action/10" : "border-border bg-card"
-                              }`}
-                            >
-                              <span className="font-semibold text-primary">{ch.label}</span>
-                            </button>
-                          );
-                        })}
+          {/* ── Multiple Choice: show all assigned questions ── */}
+          {challenge.type === "multiple_choice" && (() => {
+            const mcQs = getMCQuestions(challenge);
+            if (mcQs.length > 0) {
+              // New multi-Q format — show each assigned question
+              return (
+                <div className="space-y-4">
+                  {assignedQuestionIndices.map((idx, rank) => {
+                    const q = mcQs[idx];
+                    if (!q) return null;
+                    const showLabel = assignedQuestionIndices.length > 1;
+                    return (
+                      <div key={idx} className="space-y-2">
+                        {showLabel && (
+                          <span className="text-[11px] font-bold text-primary bg-muted rounded px-1.5 py-0.5">
+                            Q{rank + 1}
+                          </span>
+                        )}
+                        <p className="text-sm font-semibold text-foreground/90">{q.text}</p>
+                        {!success && (
+                          <div className="space-y-1.5">
+                            {q.choices.map((ch: any) => {
+                              const letter = ch.label.charAt(0);
+                              const sel = mcAnswers[idx] === letter;
+                              return (
+                                <button
+                                  key={ch.label}
+                                  type="button"
+                                  onClick={() => setMcAnswers((prev) => ({ ...prev, [idx]: letter }))}
+                                  className={`w-full text-left rounded-xl px-4 py-2.5 border-2 transition ${
+                                    sel ? "border-action bg-action/10" : "border-border bg-card"
+                                  }`}
+                                >
+                                  <span className="font-semibold text-primary">{ch.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  );
-                }
-                // Legacy single-question flat format
-                return (
-                  <div className="space-y-2">
-                    {opts.map((o: any) => {
-                      const letter = o.label.charAt(0);
-                      const sel = chosenOption === letter;
-                      return (
-                        <button
-                          key={o.label}
-                          type="button"
-                          onClick={() => setChosenOption(letter)}
-                          className={`w-full text-left rounded-xl px-4 py-3 border-2 transition ${
-                            sel ? "border-action bg-action/10" : "border-border bg-card"
-                          }`}
-                        >
-                          <span className="font-semibold text-primary">{o.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })() : challenge.type === "long_text" || challenge.type === "short_answer" ? (() => {
-                const rawKw: any = challenge.keywords || [];
-                const isSAMultiQ = rawKw.length > 0 && typeof rawKw[0] === "object" && "text" in rawKw[0];
-                if (isSAMultiQ) {
-                  // Show only the single randomly-assigned question for this group
-                  const q = (rawKw as { text: string; keywords: string[] }[])[assignedQuestionIndex] ?? rawKw[0];
-                  if (!q) return null;
+                    );
+                  })}
+                </div>
+              );
+            }
+            // Legacy single-question flat format
+            const opts = (challenge.options as any[]) || [];
+            return (
+              <div className="space-y-2">
+                <p className="text-sm whitespace-pre-wrap text-foreground/90">{challenge.question_text}</p>
+                {!success && opts.map((o: any) => {
+                  const letter = o.label.charAt(0);
+                  const sel = chosenOption === letter;
                   return (
-                    <div className="space-y-1.5">
-                      <p className="text-sm font-semibold text-foreground/90">{q.text}</p>
-                      <textarea
-                        className="field-input min-h-[80px]"
-                        placeholder="Write your answer..."
-                        value={saAnswers[0] || ""}
-                        maxLength={1000}
-                        onChange={(e) => setSaAnswers({ 0: e.target.value })}
-                      />
-                    </div>
+                    <button
+                      key={o.label}
+                      type="button"
+                      onClick={() => setChosenOption(letter)}
+                      className={`w-full text-left rounded-xl px-4 py-3 border-2 transition ${
+                        sel ? "border-action bg-action/10" : "border-border bg-card"
+                      }`}
+                    >
+                      <span className="font-semibold text-primary">{o.label}</span>
+                    </button>
                   );
-                }
-                // Legacy single question
-                return (
+                })}
+              </div>
+            );
+          })()}
+
+          {/* ── Short Answer / Long Text: show all assigned questions ── */}
+          {(challenge.type === "short_answer" || challenge.type === "long_text") && (() => {
+            const saQs = getSAQuestions(challenge);
+            if (saQs.length > 0) {
+              return (
+                <div className="space-y-4">
+                  {assignedQuestionIndices.map((idx, rank) => {
+                    const q = saQs[idx];
+                    if (!q) return null;
+                    const showLabel = assignedQuestionIndices.length > 1;
+                    return (
+                      <div key={idx} className="space-y-1.5">
+                        {showLabel && (
+                          <span className="text-[11px] font-bold text-primary bg-muted rounded px-1.5 py-0.5">
+                            Q{rank + 1}
+                          </span>
+                        )}
+                        <p className="text-sm font-semibold text-foreground/90">{q.text}</p>
+                        {!success && (
+                          <textarea
+                            className="field-input min-h-[80px]"
+                            placeholder="Write your answer..."
+                            value={saAnswers[idx] || ""}
+                            maxLength={1000}
+                            onChange={(e) => setSaAnswers((prev) => ({ ...prev, [idx]: e.target.value }))}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }
+            // Legacy single question
+            return (
+              <div className="space-y-1.5">
+                <p className="text-sm whitespace-pre-wrap text-foreground/90">{challenge.question_text}</p>
+                {!success && (
                   <textarea
                     className="field-input min-h-[100px]"
                     placeholder="Write your answer..."
@@ -583,19 +754,13 @@ export default function Play() {
                     maxLength={1000}
                     onChange={(e) => setAnswer(e.target.value)}
                   />
-                );
-              })() : (
-                <input
-                  className="field-input"
-                  placeholder={challenge.type === "sequence" ? "Enter 4-digit code" : "Your answer"}
-                  value={answer}
-                  maxLength={50}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  inputMode={challenge.type === "sequence" ? "numeric" : "text"}
-                />
-              )}
+                )}
+              </div>
+            );
+          })()}
 
-              {/* Strike indicators */}
+          {!success && (
+            <>
               {strikes > 0 && !onCooldown && (
                 <div className="flex items-center gap-2">
                   <div className="flex gap-1">
@@ -617,10 +782,12 @@ export default function Play() {
 
               <button
                 onClick={submit}
-                disabled={busy || onCooldown}
-                className={`btn-primary ${onCooldown ? "opacity-60" : ""}`}
+                disabled={busy || onCooldown || timeExpired}
+                className={`btn-primary ${(onCooldown || timeExpired) ? "opacity-60" : ""}`}
               >
-                {onCooldown
+                {timeExpired
+                  ? "⏰ Time's up"
+                  : onCooldown
                   ? `⏳ Cooldown — ${cooldownLeft}s`
                   : busy ? "Checking..."
                   : "Submit Answer"}
