@@ -16,33 +16,40 @@ function injectPrintStyles() {
   style.id = PRINT_STYLE_ID;
   style.textContent = `
     @media print {
+      @page { size: Letter portrait; margin: 0.5in; }
       body > *:not(#qr-print-area) { display: none !important; }
-      #qr-print-area { display: flex !important; }
+      #qr-print-area { display: grid !important; }
     }
     #qr-print-area {
       display: none;
-      flex-wrap: wrap;
-      gap: 32px;
-      padding: 24px;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: repeat(3, auto);
+      gap: 24px 32px;
+      padding: 0;
       font-family: sans-serif;
+      width: 100%;
+      box-sizing: border-box;
     }
     #qr-print-area .print-qr-item {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       page-break-inside: avoid;
       break-inside: avoid;
-      width: 180px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 20px 16px;
+      box-sizing: border-box;
     }
     #qr-print-area .print-qr-item .print-label {
-      font-size: 14px;
+      font-size: 18px;
       font-weight: 700;
       text-align: center;
       color: #111;
     }
     #qr-print-area .print-qr-item .print-sublabel {
-      font-size: 11px;
+      font-size: 13px;
       color: #555;
       text-align: center;
     }
@@ -956,7 +963,7 @@ export default function TeacherSession() {
           <div className="print-qr-item print-join-item">
             <div className="print-label">Session Code</div>
             <div className="print-sublabel">{session.join_code}</div>
-            <QRCodeCanvas id="print-join-qr" value={joinUrl} size={160} includeMargin />
+            <QRCodeCanvas id="print-join-qr" value={joinUrl} size={260} includeMargin />
             <div className="print-sublabel">Scan to join the session</div>
           </div>
           {unlockLevels.map((n) => (
@@ -966,7 +973,7 @@ export default function TeacherSession() {
               <QRCodeCanvas
                 id={`print-unlock-qr-${n}`}
                 value={`${window.location.origin}/session/${sessionId}/scan?from=${n}`}
-                size={160}
+                size={260}
                 includeMargin
               />
               <div className="print-sublabel">Scan to unlock next level</div>
