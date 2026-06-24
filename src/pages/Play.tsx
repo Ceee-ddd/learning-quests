@@ -180,6 +180,14 @@ export default function Play() {
   }, [group?.session_id, groupId]);
 
   const currentLevel = group?.current_level ?? 1;
+  // Assigned question index for this group at the current level (0-based).
+  // Stored in group.question_assignments as { "1": 2, "2": 0, ... }
+  const assignedQuestionIndex: number = (() => {
+    const qa = group?.question_assignments;
+    if (!qa) return 0;
+    const idx = qa[String(currentLevel)];
+    return typeof idx === "number" ? idx : 0;
+  })();
   // Enforce sequential
   useEffect(() => {
     if (group && requestedLevel && requestedLevel !== currentLevel) {
@@ -284,13 +292,13 @@ export default function Play() {
     if (c.type === "multiple_choice") {
       const opts = (c.options as any[]) || [];
       if (isMQFormat(opts)) {
-        // Multi-question: all questions must be answered correctly
-        return opts.every((q: any, qi: number) => {
-          const chosen = mcAnswers[qi];
-          if (!chosen) return false;
-          const match = (q.choices as any[])?.find((ch: any) => ch.label.startsWith(chosen));
-          return !!match?.is_correct;
-        });
+        // Randomized: only the single assigned question needs to be answered correctly
+        const assignedQ = opts[assignedQuestionIndex] ?? opts[0];
+        if (!assignedQ) return false;
+        const chosen = mcAnswers[0];
+        if (!chosen) return false;
+        const match = (assignedQ.choices as any[])?.find((ch: any) => ch.label.startsWith(chosen));
+        return !!match?.is_correct;
       }
       // Legacy single-question flat format
       const opt = opts.find((o: any) => o.label.startsWith(input));
@@ -300,12 +308,12 @@ export default function Play() {
       const raw: any = c.keywords || [];
       const isSAMultiQ = raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0];
       if (isSAMultiQ) {
-        // Every sub-question answer must hit at least one of its keywords
-        return (raw as { text: string; keywords: string[] }[]).every((q, qi) => {
-          const ans_i = (saAnswers[qi] || "").trim().toLowerCase();
-          if (q.keywords.length === 0) return ans_i.length > 5;
-          return q.keywords.some((k: string) => ans_i.includes(k.toLowerCase()));
-        });
+        // Randomized: only the single assigned question needs to be answered
+        const assignedQ = raw[assignedQuestionIndex] ?? raw[0];
+        if (!assignedQ) return false;
+        const ans_i = (saAnswers[0] || "").trim().toLowerCase();
+        if (assignedQ.keywords.length === 0) return ans_i.length > 5;
+        return assignedQ.keywords.some((k: string) => ans_i.includes(k.toLowerCase()));
       }
       // Legacy single-question
       const kws: string[] = (raw as string[]);
@@ -323,14 +331,9 @@ export default function Play() {
     const rawKw: any = challenge.keywords || [];
     const isSAMultiQ = (challenge.type === "short_answer" || challenge.type === "long_text")
       && rawKw.length > 0 && typeof rawKw[0] === "object" && "text" in rawKw[0];
-    if (isMultiQ) {
-      const unanswered = opts.findIndex((_: any, qi: number) => !mcAnswers[qi]);
-      if (unanswered !== -1) return toast.error(`Please answer Question ${unanswered + 1} first.`);
-    }
-    if (isSAMultiQ) {
-      const unanswered = (rawKw as any[]).findIndex((_: any, qi: number) => !(saAnswers[qi] || "").trim());
-      if (unanswered !== -1) return toast.error(`Please answer Question ${unanswered + 1} first.`);
-    }
+    // For randomized formats, we only show 1 question (stored at index 0 in state maps)
+    if (isMultiQ && !mcAnswers[0]) return toast.error("Please select an answer first.");
+    if (isSAMultiQ && !(saAnswers[0] || "").trim()) return toast.error("Please write an answer first.");
     const input = isMultiQ ? "" : isSAMultiQ ? "" : challenge.type === "multiple_choice" ? chosenOption : answer;
     if (!isMultiQ && !isSAMultiQ && !input.trim()) return toast.error("Enter an answer first");
 
@@ -351,7 +354,6 @@ export default function Play() {
     } else {
       const nextStrikes = strikes + 1;
       if (nextStrikes >= STRIKES_PER_TIER) {
-        // Trigger cooldown — tier increments up to the last defined value
         const tierIndex = Math.min(cooldownTier, COOLDOWN_TIERS_SEC.length - 1);
         const secs = COOLDOWN_TIERS_SEC[tierIndex];
         setCooldownUntil(Date.now() + secs * 1000);
@@ -487,34 +489,30 @@ export default function Play() {
                 const opts = (challenge.options as any[]) || [];
                 const multiQ = isMQFormat(opts);
                 if (multiQ) {
-                  // Multi-question render
+                  // Show only the single randomly-assigned question for this group
+                  const q = opts[assignedQuestionIndex] ?? opts[0];
+                  if (!q) return null;
                   return (
-                    <div className="space-y-4">
-                      {opts.map((q: any, qi: number) => (
-                        <div key={qi} className="space-y-2">
-                          <p className="text-sm font-semibold text-foreground/90">
-                            {qi + 1}. {q.text}
-                          </p>
-                          <div className="space-y-1.5">
-                            {(q.choices as any[]).map((ch: any) => {
-                              const letter = ch.label.charAt(0);
-                              const sel = mcAnswers[qi] === letter;
-                              return (
-                                <button
-                                  key={ch.label}
-                                  type="button"
-                                  onClick={() => setMcAnswers((prev) => ({ ...prev, [qi]: letter }))}
-                                  className={`w-full text-left rounded-xl px-4 py-2.5 border-2 transition ${
-                                    sel ? "border-action bg-action/10" : "border-border bg-card"
-                                  }`}
-                                >
-                                  <span className="font-semibold text-primary">{ch.label}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-foreground/90">{q.text}</p>
+                      <div className="space-y-1.5">
+                        {(q.choices as any[]).map((ch: any) => {
+                          const letter = ch.label.charAt(0);
+                          const sel = mcAnswers[0] === letter;
+                          return (
+                            <button
+                              key={ch.label}
+                              type="button"
+                              onClick={() => setMcAnswers({ 0: letter })}
+                              className={`w-full text-left rounded-xl px-4 py-2.5 border-2 transition ${
+                                sel ? "border-action bg-action/10" : "border-border bg-card"
+                              }`}
+                            >
+                              <span className="font-semibold text-primary">{ch.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 }
@@ -543,20 +541,19 @@ export default function Play() {
                 const rawKw: any = challenge.keywords || [];
                 const isSAMultiQ = rawKw.length > 0 && typeof rawKw[0] === "object" && "text" in rawKw[0];
                 if (isSAMultiQ) {
+                  // Show only the single randomly-assigned question for this group
+                  const q = (rawKw as { text: string; keywords: string[] }[])[assignedQuestionIndex] ?? rawKw[0];
+                  if (!q) return null;
                   return (
-                    <div className="space-y-4">
-                      {(rawKw as { text: string; keywords: string[] }[]).map((q, qi) => (
-                        <div key={qi} className="space-y-1.5">
-                          <p className="text-sm font-semibold text-foreground/90">{qi + 1}. {q.text}</p>
-                          <textarea
-                            className="field-input min-h-[80px]"
-                            placeholder="Write your answer..."
-                            value={saAnswers[qi] || ""}
-                            maxLength={1000}
-                            onChange={(e) => setSaAnswers((prev) => ({ ...prev, [qi]: e.target.value }))}
-                          />
-                        </div>
-                      ))}
+                    <div className="space-y-1.5">
+                      <p className="text-sm font-semibold text-foreground/90">{q.text}</p>
+                      <textarea
+                        className="field-input min-h-[80px]"
+                        placeholder="Write your answer..."
+                        value={saAnswers[0] || ""}
+                        maxLength={1000}
+                        onChange={(e) => setSaAnswers({ 0: e.target.value })}
+                      />
                     </div>
                   );
                 }

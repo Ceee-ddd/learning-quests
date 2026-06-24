@@ -321,10 +321,59 @@ export default function TeacherDashboard() {
 
   async function startSession(sessionId: string) {
     setStartingSession(sessionId);
+
+    // 1. Fetch all challenges for this session so we know the question pool per level.
+    const { data: challenges } = await supabase
+      .from("challenges")
+      .select("level, type, options, keywords")
+      .eq("session_id", sessionId)
+      .order("level");
+
+    // 2. Fetch all groups registered for this session.
+    const { data: sessionGroups } = await supabase
+      .from("groups")
+      .select("id")
+      .eq("session_id", sessionId);
+
+    // 3. For each group, randomly pick one question index per compartment level.
+    //    "Question count" = number of sub-questions in the options/keywords array.
+    //    Falls back to 1 (the only / whole challenge) if the format is flat/single.
+    function questionCount(ch: any): number {
+      if (!ch) return 1;
+      if (ch.type === "multiple_choice") {
+        const opts = (ch.options as any[]) || [];
+        if (opts.length > 0 && typeof opts[0] === "object" && "choices" in opts[0]) return opts.length;
+        return 1;
+      }
+      if (ch.type === "short_answer" || ch.type === "long_text") {
+        const raw = (ch.keywords as any[]) || [];
+        if (raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0]) return raw.length;
+        return 1;
+      }
+      return 1; // sequence / final_riddle — single question
+    }
+
+    if (sessionGroups && sessionGroups.length > 0 && challenges && challenges.length > 0) {
+      const updates = sessionGroups.map((g) => {
+        const assignments: Record<string, number> = {};
+        challenges.forEach((ch) => {
+          const count = questionCount(ch);
+          assignments[String(ch.level)] = Math.floor(Math.random() * count);
+        });
+        return supabase
+          .from("groups")
+          .update({ question_assignments: assignments })
+          .eq("id", g.id);
+      });
+      await Promise.all(updates);
+    }
+
+    // 4. Mark the session as started.
     const { error } = await supabase
       .from("sessions")
       .update({ started_at: new Date().toISOString() })
       .eq("id", sessionId);
+
     if (error) toast.error(error.message);
     else {
       toast.success("Session started! All groups are now live.");
