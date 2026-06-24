@@ -78,3 +78,21 @@ create policy "Public can insert submissions" on public.submissions for insert w
 alter publication supabase_realtime add table public.groups;
 alter publication supabase_realtime add table public.submissions;
 alter publication supabase_realtime add table public.sessions;
+
+
+
+
+-- DINAGDAG KO - ced
+
+-- sessions: start/end tracking
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS started_at        timestamptz DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS ended_at          timestamptz DEFAULT NULL;
+
+-- groups: random question assignment map
+ALTER TABLE groups
+  ADD COLUMN IF NOT EXISTS question_assignments jsonb DEFAULT NULL;
+
+-- challenges: per-compartment time limit (null = no limit)
+ALTER TABLE challenges
+  ADD COLUMN IF NOT EXISTS time_limit_seconds integer DEFAULT NULL;
