@@ -19,6 +19,8 @@ export default function Play() {
   const [group, setGroup] = useState<any>(null);
   const [sessionStatus, setSessionStatus] = useState<"loading" | "not_started" | "active" | "ended" | "deleted">("loading");
   const [challenges, setChallenges] = useState<any[]>([]);
+  // Total number of compartments in this session (was hardcoded to 5)
+  const totalLevels = challenges.length > 0 ? Math.max(...challenges.map((c) => c.level)) : 5;
   const [answer, setAnswer] = useState("");
   const [chosenOption, setChosenOption] = useState<string>("");
   // For multi-question multiple choice: map of questionIndex -> chosen letter
@@ -468,10 +470,10 @@ export default function Play() {
   async function advanceLevel() {
     if (sessionStatus !== "active") return toast.error("The session has ended.");
     const nextLevel = currentLevel + 1;
-    if (nextLevel > 5) {
+    if (nextLevel > totalLevels) {
       // Ensure start_time exists before recording finish
       const finishTime = new Date().toISOString();
-      const updates: any = { current_level: 5, finish_time: finishTime };
+      const updates: any = { current_level: totalLevels, finish_time: finishTime };
       if (!group.start_time) updates.start_time = finishTime;
       await supabase.from("groups").update(updates).eq("id", groupId!);
       nav(`/complete/${groupId}`);
@@ -565,7 +567,7 @@ export default function Play() {
   // ── Playing phase ──
   return (
     <div className="app-shell pb-12">
-      <AppHeader subtitle={`Group: ${group.group_name} · Compartment ${currentLevel}/5`} />
+      <AppHeader subtitle={`Group: ${group.group_name} · Compartment ${currentLevel}/${totalLevels}`} />
       <div className="px-4 space-y-4">
 
         <InfoBox icon={Key} label={`Compartment ${currentLevel} Padlock`} tone="warning">
@@ -800,7 +802,7 @@ export default function Play() {
                 <CheckCircle2 className="w-6 h-6" /> Code Accepted!
               </div>
               <p className="text-sm text-foreground/80">{challenge.reveal_message}</p>
-              {currentLevel < 5 ? (
+              {currentLevel < totalLevels ? (
                 <button onClick={() => setShowScanner(true)} className="btn-primary flex items-center justify-center gap-2">
                   <ScanLine className="w-5 h-5" /> Scan Compartment QR
                 </button>
