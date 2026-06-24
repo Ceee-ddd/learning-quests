@@ -24,7 +24,7 @@ function injectPrintStyles() {
       display: none;
       grid-template-columns: 1fr 1fr;
       grid-template-rows: repeat(3, auto);
-      gap: 24px 32px;
+      gap: 12px 24px;
       padding: 0;
       font-family: sans-serif;
       width: 100%;
@@ -34,29 +34,26 @@ function injectPrintStyles() {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 10px;
+      gap: 6px;
       page-break-inside: avoid;
       break-inside: avoid;
-      border: 1.5px solid #e0e0e0;
-      border-radius: 12px;
-      padding: 20px 16px;
+      padding: 10px 12px;
       box-sizing: border-box;
     }
     #qr-print-area .print-qr-item .print-label {
-      font-size: 18px;
+      font-size: 15px;
       font-weight: 700;
       text-align: center;
       color: #111;
     }
     #qr-print-area .print-qr-item .print-sublabel {
-      font-size: 13px;
+      font-size: 11px;
       color: #555;
       text-align: center;
     }
     #qr-print-area .print-qr-item canvas {
-      border: 1px solid #ddd;
       border-radius: 8px;
-      padding: 6px;
+      padding: 4px;
       background: white;
     }
   `;
@@ -963,7 +960,7 @@ export default function TeacherSession() {
           <div className="print-qr-item print-join-item">
             <div className="print-label">Session Code</div>
             <div className="print-sublabel">{session.join_code}</div>
-            <QRCodeCanvas id="print-join-qr" value={joinUrl} size={260} includeMargin />
+            <QRCodeCanvas id="print-join-qr" value={joinUrl} size={200} includeMargin />
             <div className="print-sublabel">Scan to join the session</div>
           </div>
           {unlockLevels.map((n) => (
@@ -973,7 +970,7 @@ export default function TeacherSession() {
               <QRCodeCanvas
                 id={`print-unlock-qr-${n}`}
                 value={`${window.location.origin}/session/${sessionId}/scan?from=${n}`}
-                size={260}
+                size={200}
                 includeMargin
               />
               <div className="print-sublabel">Scan to unlock next level</div>
