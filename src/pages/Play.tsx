@@ -632,7 +632,6 @@ export default function Play() {
                     value={answer}
                     maxLength={50}
                     onChange={(e) => setAnswer(e.target.value)}
-                    inputMode="numeric"
                   />
                 )}
               </div>
