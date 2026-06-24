@@ -287,7 +287,13 @@ export default function Play() {
     const c = challenge;
     const ans = input.trim().toLowerCase();
     if (c.type === "sequence" || c.type === "final_riddle") {
-      return ans === (c.correct_answer_code || "").trim().toLowerCase();
+      // Multi-variant pool: pick the assigned variant's answer code
+      const pool: any[] = (c.options as any[]) || [];
+      const isPool = pool.length > 0 && "correct_answer_code" in pool[0];
+      const correctCode = isPool
+        ? (pool[assignedQuestionIndex] ?? pool[0])?.correct_answer_code ?? ""
+        : c.correct_answer_code ?? "";
+      return ans === correctCode.trim().toLowerCase();
     }
     if (c.type === "multiple_choice") {
       const opts = (c.options as any[]) || [];
@@ -481,7 +487,18 @@ export default function Play() {
             <Puzzle className="w-5 h-5" />
             <h3 className="font-bold">Compartment {currentLevel} Challenge</h3>
           </div>
-          <p className="text-sm whitespace-pre-wrap text-foreground/90">{challenge.question_text}</p>
+          {(() => {
+            // For sequence/riddle with a multi-variant pool, show the assigned variant's prompt
+            if (challenge.type === "sequence" || challenge.type === "final_riddle") {
+              const pool: any[] = (challenge.options as any[]) || [];
+              const isPool = pool.length > 0 && "correct_answer_code" in pool[0];
+              if (isPool) {
+                const variant = pool[assignedQuestionIndex] ?? pool[0];
+                return <p className="text-sm whitespace-pre-wrap text-foreground/90">{variant?.question_text || ""}</p>;
+              }
+            }
+            return <p className="text-sm whitespace-pre-wrap text-foreground/90">{challenge.question_text}</p>;
+          })()}
 
           {!success && (
             <>

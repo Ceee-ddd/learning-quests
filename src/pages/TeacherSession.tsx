@@ -539,8 +539,8 @@ export default function TeacherSession() {
                 </select>
               </div>
 
-              {/* Question / Prompt - single field for sequence/final_riddle/multiple_choice */}
-              {(activeChallenge.type === "sequence" || activeChallenge.type === "final_riddle" || activeChallenge.type === "multiple_choice") && (
+              {/* Question / Prompt - single field for multiple_choice */}
+              {activeChallenge.type === "multiple_choice" && (
                 <label className="block text-xs">
                   <span className="font-semibold text-primary">Question / Prompt</span>
                   <textarea
@@ -551,16 +551,97 @@ export default function TeacherSession() {
                 </label>
               )}
 
-              {(activeChallenge.type === "sequence" || activeChallenge.type === "final_riddle") && (
-                <label className="block text-xs">
-                  <span className="font-semibold text-primary">Correct Answer Code</span>
-                  <input
-                    className="field-input mt-1 text-sm py-4 sm:py-3"
-                    value={activeChallenge.correct_answer_code || ""}
-                    onChange={(e) => updateChallenge(activeChallenge.id, { correct_answer_code: e.target.value })}
-                  />
-                </label>
-              )}
+              {/* Sequence / Riddle multi-variant pool editor */}
+              {(activeChallenge.type === "sequence" || activeChallenge.type === "final_riddle") && (() => {
+                type SeqVariant = { question_text: string; correct_answer_code: string };
+                const rawOpts: any[] = activeChallenge.options || [];
+                const isPool = rawOpts.length > 0 && "correct_answer_code" in rawOpts[0];
+
+                // Seed from top-level fields on first render if no pool yet
+                const variants: SeqVariant[] = isPool
+                  ? (rawOpts as SeqVariant[])
+                  : [{ question_text: activeChallenge.question_text || "", correct_answer_code: activeChallenge.correct_answer_code || "" }];
+
+                function saveVariants(next: SeqVariant[]) {
+                  // Keep top-level fields in sync with variant[0] for backwards-compat
+                  updateChallenge(activeChallenge.id, {
+                    options: next,
+                    question_text: next[0]?.question_text ?? "",
+                    correct_answer_code: next[0]?.correct_answer_code ?? "",
+                  });
+                }
+
+                function updateVariant(vi: number, patch: Partial<SeqVariant>) {
+                  const next = variants.map((v, i) => i === vi ? { ...v, ...patch } : v);
+                  saveVariants(next);
+                }
+
+                function addVariant() {
+                  saveVariants([...variants, { question_text: "", correct_answer_code: "" }]);
+                }
+
+                function removeVariant(vi: number) {
+                  if (variants.length <= 1) return;
+                  saveVariants(variants.filter((_, i) => i !== vi));
+                }
+
+                const typeLabel = activeChallenge.type === "final_riddle" ? "Riddle" : "Sequence";
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-primary">
+                        {typeLabel} Pool
+                        <span className="ml-1.5 font-normal text-muted-foreground">({variants.length} variant{variants.length !== 1 ? "s" : ""})</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={addVariant}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                      >
+                        <Plus className="w-3 h-3" /> Add {typeLabel}
+                      </button>
+                    </div>
+
+                    {variants.map((v, vi) => (
+                      <div key={vi} className="rounded-xl border-2 border-border bg-muted/10 p-3 space-y-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="shrink-0 text-[11px] font-bold text-primary bg-muted rounded px-1.5 py-0.5">
+                            {variants.length === 1 ? typeLabel : `${typeLabel} ${vi + 1}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeVariant(vi)}
+                            disabled={variants.length <= 1}
+                            title="Remove variant"
+                            className="ml-auto shrink-0 w-7 h-7 flex items-center justify-center rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10 transition disabled:opacity-30"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <label className="block text-[11px]">
+                          <span className="font-semibold text-muted-foreground">Question / Prompt</span>
+                          <textarea
+                            className="field-input mt-1 min-h-[100px] text-sm"
+                            placeholder={`${typeLabel} question or clue…`}
+                            value={v.question_text}
+                            onChange={(e) => updateVariant(vi, { question_text: e.target.value })}
+                          />
+                        </label>
+                        <label className="block text-[11px]">
+                          <span className="font-semibold text-muted-foreground">Correct Answer Code</span>
+                          <input
+                            className="field-input mt-1 text-sm py-3"
+                            placeholder="e.g. 4182"
+                            value={v.correct_answer_code}
+                            onChange={(e) => updateVariant(vi, { correct_answer_code: e.target.value })}
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* Multi-Question editor for short_answer and long_text */}
               {(activeChallenge.type === "short_answer" || activeChallenge.type === "long_text") && (() => {

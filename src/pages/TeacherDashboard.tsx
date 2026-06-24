@@ -340,6 +340,12 @@ export default function TeacherDashboard() {
     //    Falls back to 1 (the only / whole challenge) if the format is flat/single.
     function questionCount(ch: any): number {
       if (!ch) return 1;
+      if (ch.type === "sequence" || ch.type === "final_riddle") {
+        // Multi-variant pool stored in options as [{question_text, correct_answer_code}]
+        const pool = (ch.options as any[]) || [];
+        if (pool.length > 0 && "correct_answer_code" in pool[0]) return pool.length;
+        return 1;
+      }
       if (ch.type === "multiple_choice") {
         const opts = (ch.options as any[]) || [];
         if (opts.length > 0 && typeof opts[0] === "object" && "choices" in opts[0]) return opts.length;
@@ -350,7 +356,7 @@ export default function TeacherDashboard() {
         if (raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0]) return raw.length;
         return 1;
       }
-      return 1; // sequence / final_riddle — single question
+      return 1;
     }
 
     if (sessionGroups && sessionGroups.length > 0 && challenges && challenges.length > 0) {
