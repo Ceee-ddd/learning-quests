@@ -230,8 +230,9 @@ export default function Play() {
       setTimeExpired(false);
       return;
     }
-    // Only set expiry once per level (don't restart on re-renders)
-    setTimeLimitExpiry((prev) => prev ?? Date.now() + secs * 1000);
+    // Arm a fresh expiry every time we enter a new compartment
+    setTimeLimitExpiry(Date.now() + secs * 1000);
+    setTimeExpired(false);
   }, [gamePhase, challenge?.id]);
 
   // Detect expiry each tick
@@ -244,6 +245,8 @@ export default function Play() {
   }, [now, timeLimitExpiry, timeExpired, success]);
 
   // Reset per-challenge state when level changes
+  // (timer is armed by the effect above — don't reset it here, or it'll wipe out
+  // the new compartment's timer right after it's set)
   useEffect(() => {
     setAnswer("");
     setChosenOption("");
@@ -253,8 +256,6 @@ export default function Play() {
     setStrikes(0);
     setCooldownTier(0);
     setCooldownUntil(0);
-    setTimeLimitExpiry(null);
-    setTimeExpired(false);
   }, [currentLevel]);
 
   // Session status gate — shown before the main game UI
