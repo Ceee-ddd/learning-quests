@@ -26,6 +26,7 @@ export type Database = {
           reveal_message: string | null
           session_id: string
           story_text: string | null
+          time_limit_seconds: number | null
           type: string
         }
         Insert: {
@@ -39,6 +40,7 @@ export type Database = {
           reveal_message?: string | null
           session_id: string
           story_text?: string | null
+          time_limit_seconds?: number | null
           type: string
         }
         Update: {
@@ -52,6 +54,7 @@ export type Database = {
           reveal_message?: string | null
           session_id?: string
           story_text?: string | null
+          time_limit_seconds?: number | null
           type?: string
         }
         Relationships: [
@@ -73,6 +76,7 @@ export type Database = {
           id: string
           members: Json
           password: string
+          question_assignments: Json | null
           session_id: string
           start_time: string | null
         }
@@ -84,6 +88,7 @@ export type Database = {
           id?: string
           members?: Json
           password?: string
+          question_assignments?: Json | null
           session_id: string
           start_time?: string | null
         }
@@ -95,6 +100,7 @@ export type Database = {
           id?: string
           members?: Json
           password?: string
+          question_assignments?: Json | null
           session_id?: string
           start_time?: string | null
         }
@@ -112,25 +118,31 @@ export type Database = {
         Row: {
           allow_late_registration: boolean
           created_at: string
+          ended_at: string | null
           id: string
           is_active: boolean
           join_code: string
+          started_at: string | null
           teacher_id: string
         }
         Insert: {
           allow_late_registration?: boolean
           created_at?: string
+          ended_at?: string | null
           id?: string
           is_active?: boolean
           join_code: string
+          started_at?: string | null
           teacher_id: string
         }
         Update: {
           allow_late_registration?: boolean
           created_at?: string
+          ended_at?: string | null
           id?: string
           is_active?: boolean
           join_code?: string
+          started_at?: string | null
           teacher_id?: string
         }
         Relationships: []
