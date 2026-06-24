@@ -596,13 +596,6 @@ export default function TeacherSession() {
                         {typeLabel} Pool
                         <span className="ml-1.5 font-normal text-muted-foreground">({variants.length} variant{variants.length !== 1 ? "s" : ""})</span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={addVariant}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
-                      >
-                        <Plus className="w-3 h-3" /> Add {typeLabel}
-                      </button>
                     </div>
 
                     {/* Display count control — only shown when pool has >1 variant */}
@@ -669,6 +662,14 @@ export default function TeacherSession() {
                         </label>
                       </div>
                     ))}
+
+                    <button
+                      type="button"
+                      onClick={addVariant}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                    >
+                      <Plus className="w-3 h-3" /> Add {typeLabel}
+                    </button>
                   </div>
                 );
               })()}
@@ -725,13 +726,6 @@ export default function TeacherSession() {
                         Questions
                         <span className="ml-1.5 font-normal text-muted-foreground">({questions.length} total)</span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={addQuestion}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
-                      >
-                        <Plus className="w-3 h-3" /> Add Question
-                      </button>
                     </div>
 
                     {/* Display count control — only shown when pool has >1 question */}
@@ -795,6 +789,14 @@ export default function TeacherSession() {
                         </div>
                       </div>
                     ))}
+
+                    <button
+                      type="button"
+                      onClick={addQuestion}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                    >
+                      <Plus className="w-3 h-3" /> Add Question
+                    </button>
                   </div>
                 );
               })()}
@@ -891,13 +893,6 @@ export default function TeacherSession() {
                         Questions &amp; Choices
                         <span className="ml-1.5 font-normal text-muted-foreground">({questions.length} total)</span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={addQuestion}
-                        className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
-                      >
-                        <Plus className="w-3 h-3" /> Add Question
-                      </button>
                     </div>
 
                     {/* Display count control — only shown when pool has >1 question */}
@@ -996,6 +991,14 @@ export default function TeacherSession() {
                         </div>
                       </div>
                     ))}
+
+                    <button
+                      type="button"
+                      onClick={addQuestion}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-action border border-action/40 rounded-lg px-2 py-1 hover:bg-action/10 transition"
+                    >
+                      <Plus className="w-3 h-3" /> Add Question
+                    </button>
                   </div>
                 );
               })()}
