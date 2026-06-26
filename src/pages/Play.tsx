@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "@/components/AppHeader";
 import { InfoBox } from "@/components/InfoBox";
 import { QRScanner } from "@/components/QRScanner";
-import { BookOpen, Key, ScanLine, CheckCircle2, Puzzle, Home, Timer } from "lucide-react";
+import { BookOpen, Key, ScanLine, CheckCircle2, Puzzle, Home, Timer, Star } from "lucide-react";
 import { toast } from "sonner";
 
 const STRIKES_PER_TIER = 3;       // wrong answers before a cooldown triggers
@@ -57,6 +57,13 @@ export default function Play() {
   const [timeLimitExpiry, setTimeLimitExpiry] = useState<number | null>(null); // epoch ms when timer expires
   const [timeExpired, setTimeExpired] = useState(false);
 
+  // Points system — per-compartment earned points
+  // 30 pts: time limit with ≧55 s remaining (or no time limit set)
+  // 15 pts: ≧30 s remaining
+  //  1 pt : time expired but still answered
+  const [compartmentPoints, setCompartmentPoints] = useState<Record<string, number>>({});
+  const [lastEarnedPoints, setLastEarnedPoints] = useState<number | null>(null);
+
   // tick for cooldown countdown
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -83,6 +90,12 @@ export default function Play() {
       }
 
       setGroup(g);
+
+      // Hydrate per-compartment points from persisted question_assignments._pts
+      const qa = (g.question_assignments as any) ?? {};
+      if (qa._pts && typeof qa._pts === "object") {
+        setCompartmentPoints(qa._pts as Record<string, number>);
+      }
 
       // Check the parent session
       const { data: sess } = await supabase
@@ -256,6 +269,7 @@ export default function Play() {
     setStrikes(0);
     setCooldownTier(0);
     setCooldownUntil(0);
+    setLastEarnedPoints(null);
   }, [currentLevel]);
 
   // Session status gate — shown before the main game UI
@@ -330,6 +344,9 @@ export default function Play() {
   const timerProgress = (timeLeft !== null && totalTime) ? timeLeft / totalTime : 1;
   const timerUrgent = timeLeft !== null && timeLeft <= 30;
 
+  // Total accumulated points across all completed compartments
+  const totalPoints = Object.values(compartmentPoints).reduce((sum, p) => sum + p, 0);
+
   // ── Pool resolution helpers ──────────────────────────────────────────────────
   // Unwrap the new { variants/questions, display_count } wrapper or fall back to legacy arrays.
 
@@ -352,6 +369,38 @@ export default function Play() {
     if (raw && !Array.isArray(raw) && "questions" in raw) return raw.questions || [];
     if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === "object" && "text" in raw[0]) return raw;
     return [];
+  }
+
+    // ── Points calculation ────────────────────────────────────
+  // Returns points earned for a correct answer based on % of time still remaining.
+  // 30 pts: 91-100% | 25 pts: 76-90% | 20 pts: 59-75% | 15 pts: 39-58%
+  // 10 pts: 16-38%  | 5 pts: 1-15%   | 1 pt: no time left
+  // No time limit set on the challenge -> max points (30).
+  function calcPointsEarned(): number {
+    if (timeExpired) return 1;
+    if (timeLimitExpiry === null) return 30;
+    const remaining = Math.max(0, Math.ceil((timeLimitExpiry - Date.now()) / 1000));
+    const total = challenge?.time_limit_seconds ?? 0;
+    if (total <= 0) return 30;
+    const pct = (remaining / total) * 100;
+    if (pct >= 91) return 30;
+    if (pct >= 76) return 25;
+    if (pct >= 59) return 20;
+    if (pct >= 39) return 15;
+    if (pct >= 16) return 10;
+    if (pct >= 1) return 5;
+    return 1;
+  }
+
+  // Visual styling/labels for a given earned-points value (matches tiers above).
+  function getPointsTierStyle(pts: number): { bg: string; accent: string; label: string } {
+    if (pts >= 30) return { bg: "bg-amber-400/10 border-amber-400/30", accent: "text-amber-500", label: "Lightning fast!" };
+    if (pts >= 25) return { bg: "bg-amber-400/10 border-amber-400/30", accent: "text-amber-500", label: "Excellent pace!" };
+    if (pts >= 20) return { bg: "bg-sky-400/10 border-sky-400/30", accent: "text-sky-500", label: "Great pace!" };
+    if (pts >= 15) return { bg: "bg-sky-400/10 border-sky-400/30", accent: "text-sky-500", label: "Good pace!" };
+    if (pts >= 10) return { bg: "bg-muted border-border", accent: "text-muted-foreground", label: "Steady pace" };
+    if (pts >= 5) return { bg: "bg-muted border-border", accent: "text-muted-foreground", label: "Answered in time" };
+    return { bg: "bg-muted border-border", accent: "text-muted-foreground", label: "Answered after time" };
   }
 
   // ── Validation ───────────────────────────────────────────────────────────────
@@ -412,7 +461,6 @@ export default function Play() {
   async function submit() {
     if (sessionStatus !== "active") return toast.error("The session has ended.");
     if (onCooldown) return;
-    if (timeExpired) return toast.error("Time's up — this compartment is locked.");
 
     const mcQs = getMCQuestions(challenge);
     const saQs = getSAQuestions(challenge);
@@ -447,6 +495,17 @@ export default function Play() {
     }
 
     if (ok) {
+      // Award points based on speed
+      const pts = calcPointsEarned();
+      setLastEarnedPoints(pts);
+      const updatedPts = { ...compartmentPoints, [String(currentLevel)]: pts };
+      setCompartmentPoints(updatedPts);
+
+      // Persist points into question_assignments._pts (JSONB merge)
+      const existingQa = (group.question_assignments as any) ?? {};
+      const newQa = { ...existingQa, _pts: updatedPts };
+      await supabase.from("groups").update({ question_assignments: newQa }).eq("id", groupId!);
+
       setSuccess(true);
       toast.success("Correct!");
     } else {
@@ -583,20 +642,30 @@ export default function Play() {
             </div>
 
             {/* Countdown timer badge — only shown when a limit is set */}
-            {timeLeft !== null && !success && (
-              <div className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold tabular-nums transition-colors ${
-                timeExpired
-                  ? "bg-destructive/15 text-destructive"
-                  : timerUrgent
-                  ? "bg-destructive/10 text-destructive animate-pulse"
-                  : "bg-muted text-foreground"
-              }`}>
-                <Timer className="w-3.5 h-3.5 shrink-0" />
-                {timeExpired
-                  ? "Time's up"
-                  : `${String(Math.floor(timeLeft / 60)).padStart(2, "0")}:${String(timeLeft % 60).padStart(2, "0")}`}
-              </div>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Live points badge — shows accumulated score */}
+              {totalPoints > 0 && (
+                <div className="flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-amber-400/15 text-amber-600 border border-amber-400/30 tabular-nums">
+                  <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                  {totalPoints} pts
+                </div>
+              )}
+
+              {timeLeft !== null && !success && (
+                <div className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold tabular-nums transition-colors ${
+                  timeExpired
+                    ? "bg-destructive/15 text-destructive"
+                    : timerUrgent
+                    ? "bg-destructive/10 text-destructive animate-pulse"
+                    : "bg-muted text-foreground"
+                }`}>
+                  <Timer className="w-3.5 h-3.5 shrink-0" />
+                  {timeExpired
+                    ? "Time's up"
+                    : `${String(Math.floor(timeLeft / 60)).padStart(2, "0")}:${String(timeLeft % 60).padStart(2, "0")}`}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Timer progress bar */}
@@ -615,7 +684,7 @@ export default function Play() {
           {timeExpired && !success && (
             <div className="rounded-xl bg-destructive/10 border-2 border-destructive/40 p-3 text-center space-y-1">
               <p className="text-sm font-bold text-destructive">⏰ Time's up!</p>
-              <p className="text-xs text-muted-foreground">Your answer for this compartment has been locked.</p>
+              <p className="text-xs text-muted-foreground">You can still answer, but a correct answer now earns only 1 point.</p>
             </div>
           )}
 
@@ -784,14 +853,13 @@ export default function Play() {
 
               <button
                 onClick={submit}
-                disabled={busy || onCooldown || timeExpired}
-                className={`btn-primary ${(onCooldown || timeExpired) ? "opacity-60" : ""}`}
+                disabled={busy || onCooldown}
+                className={`btn-primary ${onCooldown ? "opacity-60" : ""}`}
               >
-                {timeExpired
-                  ? "⏰ Time's up"
-                  : onCooldown
+                {onCooldown
                   ? `⏳ Cooldown — ${cooldownLeft}s`
                   : busy ? "Checking..."
+                  : timeExpired ? "Submit Answer (1 pt)"
                   : "Submit Answer"}
               </button>
             </>
@@ -802,6 +870,32 @@ export default function Play() {
               <div className="flex items-center gap-2 text-success font-bold">
                 <CheckCircle2 className="w-6 h-6" /> Code Accepted!
               </div>
+
+              {/* Points earned for this compartment */}
+              {lastEarnedPoints !== null && (() => {
+                const tier = getPointsTierStyle(lastEarnedPoints);
+                return (
+                  <div className={`flex items-center justify-between rounded-xl px-4 py-2.5 border ${tier.bg}`}>
+                    <div className="flex items-center gap-2">
+                      <Star className={`w-4 h-4 fill-current ${tier.accent}`} />
+                      <span className="text-sm font-bold text-foreground">{tier.label}</span>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className={`text-xl font-extrabold tabular-nums ${tier.accent}`}>+{lastEarnedPoints}</span>
+                      <span className="text-xs text-muted-foreground font-semibold">pts</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Running total */}
+              {totalPoints > 0 && (
+                <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+                  <span>Total score so far</span>
+                  <span className="font-bold text-foreground tabular-nums">{totalPoints} pts</span>
+                </div>
+              )}
+
               <p className="text-sm text-foreground/80">{challenge.reveal_message}</p>
               {currentLevel < totalLevels ? (
                 <button onClick={() => setShowScanner(true)} className="btn-primary flex items-center justify-center gap-2">

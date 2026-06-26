@@ -6,8 +6,19 @@ import { useAuth } from "@/hooks/useAuth";
 import { AppHeader } from "@/components/AppHeader";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { DEFAULT_CHALLENGES, DEFAULT_STORY, genJoinCode } from "@/lib/gameDefaults";
-import { Plus, LogOut, ExternalLink, Trophy, QrCode, X, Trash2, PlayCircle, StopCircle, ChevronDown, ChevronUp, Users, History, Clock } from "lucide-react";
+import { Plus, LogOut, ExternalLink, Trophy, QrCode, X, Trash2, PlayCircle, StopCircle, ChevronDown, ChevronUp, Users, History, Clock, Star } from "lucide-react";
 import { toast } from "sonner";
+
+/** Sum all per-compartment points stored in question_assignments._pts */
+function extractPoints(qa: any): number {
+  if (!qa || typeof qa !== "object") return 0;
+  const pts = qa._pts;
+  if (!pts || typeof pts !== "object") return 0;
+  return Object.values(pts as Record<string, number>).reduce(
+    (sum: number, v) => sum + (typeof v === "number" ? v : 0),
+    0
+  );
+}
 
 // ── FLIP-animated leaderboard row ───────────────────────────────────────────
 // Tracks its own DOM position and plays a smooth slide when the list reorders.
@@ -48,6 +59,7 @@ interface AnimatedRowProps {
   elapsed: number;
   currentLevel: number;
   pct: number;
+  points: number;
   membersExpanded: boolean;
   memberList: string[];
   onToggleExpand: () => void;
@@ -55,7 +67,7 @@ interface AnimatedRowProps {
 
 function AnimatedRow({
   groupId, rank, isFinished, groupName, password, elapsed,
-  currentLevel, pct, membersExpanded, memberList, onToggleExpand,
+  currentLevel, pct, points, membersExpanded, memberList, onToggleExpand,
 }: AnimatedRowProps) {
   const ref = useRef<HTMLDivElement>(null);
   const prevTop = useRef<number | null>(null);
@@ -164,6 +176,12 @@ function AnimatedRow({
             </span>
 
             <div className="flex items-center gap-2 shrink-0">
+              {points > 0 && (
+                <span className="flex items-center gap-0.5 text-[10px] font-bold text-amber-500 tabular-nums">
+                  <Star className="w-3 h-3 fill-current" />
+                  {points}
+                </span>
+              )}
               <span className={`text-xs tabular-nums ${meta ? meta.text : "text-muted-foreground"}`}>
                 {isFinished ? `✓ ${m}m ${sec}s` : `L${currentLevel}/5 · ${m}m ${sec}s`}
               </span>
@@ -780,6 +798,7 @@ export default function TeacherDashboard() {
                         )
                       : 0;
                     const pct = isFinished ? 100 : ((g.current_level - 1) / 5) * 100;
+                    const points = extractPoints(g.question_assignments);
                     const membersExpanded = expandedGroups.has(g.id);
                     const memberList: string[] = g.members || [];
                     return (
@@ -793,6 +812,7 @@ export default function TeacherDashboard() {
                         elapsed={elapsed}
                         currentLevel={g.current_level}
                         pct={pct}
+                        points={points}
                         membersExpanded={membersExpanded}
                         memberList={memberList}
                         onToggleExpand={() => toggleGroupExpand(g.id)}
@@ -921,7 +941,15 @@ export default function TeacherDashboard() {
                                       <span className="min-w-0 flex-1 font-medium truncate">{g.group_name}</span>
                                     </div>
                                     {isFinished ? (
-                                      <span className="tabular-nums text-xs text-muted-foreground shrink-0">✓ {m}m {sec}s</span>
+                                      <span className="flex items-center gap-2 shrink-0">
+                                        {extractPoints(g.question_assignments) > 0 && (
+                                          <span className="flex items-center gap-0.5 text-xs font-bold text-amber-500 tabular-nums">
+                                            <Star className="w-3 h-3 fill-current" />
+                                            {extractPoints(g.question_assignments)}
+                                          </span>
+                                        )}
+                                        <span className="tabular-nums text-xs text-muted-foreground">✓ {m}m {sec}s</span>
+                                      </span>
                                     ) : (
                                       <span className="text-xs text-muted-foreground shrink-0">L{g.current_level}/5</span>
                                     )}

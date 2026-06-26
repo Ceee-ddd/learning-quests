@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { AppHeader } from "@/components/AppHeader";
-import { Trophy, Clock, Medal, Home } from "lucide-react";
+import { Trophy, Clock, Medal, Home, Star, Zap } from "lucide-react";
 
 interface RankedGroup {
   id: string;
   group_name: string;
   elapsed_ms: number;
+  total_points: number;
   rank: number;
 }
 
@@ -27,11 +28,16 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-const MEDAL_COLORS: Record<number, string> = {
-  1: "text-yellow-500",
-  2: "text-slate-400",
-  3: "text-amber-600",
-};
+/** Sum all per-compartment points stored in question_assignments._pts */
+function extractPoints(qa: any): number {
+  if (!qa || typeof qa !== "object") return 0;
+  const pts = qa._pts;
+  if (!pts || typeof pts !== "object") return 0;
+  return Object.values(pts as Record<string, number>).reduce(
+    (sum: number, v) => sum + (typeof v === "number" ? v : 0),
+    0
+  );
+}
 
 export default function Complete() {
   const { groupId } = useParams();
@@ -39,29 +45,41 @@ export default function Complete() {
   const [groupName, setGroupName] = useState<string>("");
   const [myRank, setMyRank] = useState<number | null>(null);
   const [myElapsed, setMyElapsed] = useState<number | null>(null);
+  const [myPoints, setMyPoints] = useState<number>(0);
   const [leaderboard, setLeaderboard] = useState<RankedGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [myStartTime, setMyStartTime] = useState<string | null>(null);
   const [myFinishTime, setMyFinishTime] = useState<string | null>(null);
+  const [hasPointsData, setHasPointsData] = useState(false);
 
   async function loadLeaderboard(sid: string, gid: string, startTime: string, finishTime: string) {
     const { data: allGroups } = await supabase
       .from("groups")
-      .select("id, group_name, start_time, finish_time")
+      .select("id, group_name, start_time, finish_time, question_assignments")
       .eq("session_id", sid)
       .not("finish_time", "is", null)
       .not("start_time", "is", null);
 
     if (allGroups && allGroups.length > 0) {
+      const anyHasPoints = allGroups.some((g) => extractPoints(g.question_assignments) > 0);
+      setHasPointsData(anyHasPoints);
+
       const ranked: RankedGroup[] = allGroups
         .map((g) => ({
           id: g.id,
           group_name: g.group_name,
           elapsed_ms: new Date(g.finish_time).getTime() - new Date(g.start_time).getTime(),
+          total_points: extractPoints(g.question_assignments),
         }))
         .filter((g) => g.elapsed_ms > 0)
-        .sort((a, b) => a.elapsed_ms - b.elapsed_ms)
+        // Sort by points desc, then time asc as tiebreaker
+        .sort((a, b) => {
+          if (anyHasPoints) {
+            if (b.total_points !== a.total_points) return b.total_points - a.total_points;
+          }
+          return a.elapsed_ms - b.elapsed_ms;
+        })
         .map((g, i) => ({ ...g, rank: i + 1 }));
 
       setLeaderboard(ranked);
@@ -70,6 +88,7 @@ export default function Complete() {
       if (mine) {
         setMyRank(mine.rank);
         setMyElapsed(mine.elapsed_ms);
+        setMyPoints(mine.total_points);
       } else if (startTime && finishTime) {
         setMyElapsed(new Date(finishTime).getTime() - new Date(startTime).getTime());
       }
@@ -82,7 +101,7 @@ export default function Complete() {
       // 1. Load this group
       const { data: group } = await supabase
         .from("groups")
-        .select("group_name, finish_time, start_time, session_id")
+        .select("group_name, finish_time, start_time, session_id, question_assignments")
         .eq("id", groupId)
         .maybeSingle();
 
@@ -90,6 +109,11 @@ export default function Complete() {
 
       setGroupName(group.group_name);
       setSessionId(group.session_id);
+
+      // Extract points from persisted data
+      const pts = extractPoints(group.question_assignments);
+      setMyPoints(pts);
+      if (pts > 0) setHasPointsData(true);
 
       // 2. Record finish_time if not yet set
       let finishTime = group.finish_time;
@@ -121,6 +145,12 @@ export default function Complete() {
     return () => { supabase.removeChannel(ch); };
   }, [sessionId, groupId, myStartTime, myFinishTime]);
 
+  // Points tier label
+  const pointsLabel =
+    myPoints >= 30 * 3 ? "Outstanding!" :
+    myPoints >= 30 * 2 ? "Excellent!" :
+    myPoints > 0 ? "Well done!" : null;
+
   return (
     <div className="app-shell pb-12">
       <AppHeader />
@@ -133,34 +163,56 @@ export default function Complete() {
           </div>
           <h2 className="text-2xl font-bold text-primary">Congratulations, Investigators!</h2>
           <p className="text-sm text-muted-foreground">
-            You have solved "The Last Message of Room 407" and unlocked all compartments.
+            You have solved all compartments and completed the activity.
           </p>
           {groupName && (
             <p className="text-base font-semibold text-foreground">Well done, Group {groupName}!</p>
           )}
 
-          {/* ── Time + Rank ── */}
+          {/* ── Stats row: Time · Points · Rank ── */}
           {!loading && myElapsed !== null && (
             <div className="flex justify-center gap-3 pt-1">
+
               {/* Elapsed time */}
-              <div className="flex-1 max-w-[140px] rounded-2xl bg-muted/50 border border-border px-4 py-3 space-y-1">
+              <div className="flex-1 max-w-[130px] rounded-2xl bg-muted/50 border border-border px-3 py-3 space-y-1">
                 <div className="flex items-center justify-center gap-1.5 text-muted-foreground">
-                  <Clock className="w-4 h-4" />
-                  <span className="text-[11px] font-semibold uppercase tracking-wide">Your Time</span>
+                  <Clock className="w-3.5 h-3.5" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wide">Your Time</span>
                 </div>
-                <div className="text-xl font-bold text-primary tabular-nums">
+                <div className="text-lg font-bold text-primary tabular-nums">
                   {formatElapsed(myElapsed)}
                 </div>
               </div>
 
+              {/* Points — only shown when this session used time limits */}
+              {hasPointsData && (
+                <div className="flex-1 max-w-[130px] rounded-2xl bg-amber-400/10 border border-amber-400/30 px-3 py-3 space-y-1">
+                  <div className="flex items-center justify-center gap-1.5 text-amber-600">
+                    <Star className="w-3.5 h-3.5 fill-amber-500" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wide">Your Score</span>
+                  </div>
+                  <div className="text-lg font-bold text-amber-600 tabular-nums">
+                    {myPoints} pts
+                  </div>
+                  {pointsLabel && (
+                    <div className="text-[10px] font-semibold text-amber-500/80">{pointsLabel}</div>
+                  )}
+                </div>
+              )}
+
               {/* Rank */}
               {myRank !== null && (
-                <div className="flex-1 max-w-[140px] rounded-2xl bg-muted/50 border border-border px-4 py-3 space-y-1">
+                <div className="flex-1 max-w-[130px] rounded-2xl bg-muted/50 border border-border px-3 py-3 space-y-1">
                   <div className="flex items-center justify-center gap-1.5 text-muted-foreground">
-                    <Medal className="w-4 h-4" />
-                    <span className="text-[11px] font-semibold uppercase tracking-wide">Your Place</span>
+                    <Medal className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wide">Your Place</span>
                   </div>
-                  <div className={`text-xl font-bold tabular-nums ${MEDAL_COLORS[myRank] ?? "text-primary"}`}>
+                  <div className={`text-lg font-bold tabular-nums ${
+                    myRank === 1 ? "text-yellow-500" :
+                    myRank === 2 ? "text-slate-400" :
+                    myRank === 3 ? "text-amber-600" :
+                    "text-primary"
+                  }`}>
                     {ordinal(myRank)}
                   </div>
                 </div>
@@ -189,15 +241,33 @@ export default function Complete() {
                 <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
                 Live
               </span>
-              <span className="text-xs text-muted-foreground ml-auto">{leaderboard.length} group{leaderboard.length !== 1 ? "s" : ""} finished</span>
+              {hasPointsData && (
+                <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-500 ml-1">
+                  <Zap className="w-3 h-3" /> Ranked by score
+                </span>
+              )}
+              <span className="text-xs text-muted-foreground ml-auto">
+                {leaderboard.length} group{leaderboard.length !== 1 ? "s" : ""} finished
+              </span>
             </div>
+
+            {/* Column headers — only show points column when data exists */}
+            <div className={`grid text-[10px] font-semibold uppercase tracking-wide text-muted-foreground px-3 ${hasPointsData ? "grid-cols-[auto_1fr_auto_auto]" : "grid-cols-[auto_1fr_auto]"} gap-3`}>
+              <span>#</span>
+              <span>Group</span>
+              {hasPointsData && <span className="text-right text-amber-500">Score</span>}
+              <span className="text-right">Time</span>
+            </div>
+
             <div className="space-y-2">
               {leaderboard.map((g) => {
                 const isMe = g.id === groupId;
                 return (
                   <div
                     key={g.id}
-                    className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border transition ${
+                    className={`grid items-center gap-3 rounded-xl px-3 py-2.5 border transition ${
+                      hasPointsData ? "grid-cols-[auto_1fr_auto_auto]" : "grid-cols-[auto_1fr_auto]"
+                    } ${
                       isMe
                         ? "border-action bg-action/8 font-semibold"
                         : "border-border bg-background/50"
@@ -213,17 +283,39 @@ export default function Complete() {
                       {g.rank <= 3 ? ["🥇","🥈","🥉"][g.rank - 1] : g.rank}
                     </div>
 
-                    <span className={`flex-1 text-sm truncate ${isMe ? "text-action" : "text-foreground"}`}>
+                    <span className={`text-sm truncate ${isMe ? "text-action" : "text-foreground"}`}>
                       {g.group_name}{isMe && " (you)"}
                     </span>
 
-                    <span className="text-sm tabular-nums text-muted-foreground shrink-0">
+                    {/* Points column */}
+                    {hasPointsData && (
+                      <span className={`text-sm font-bold tabular-nums text-right ${
+                        g.total_points >= 25 ? "text-amber-500" :
+                        g.total_points >= 15 ? "text-sky-500" :
+                        "text-muted-foreground"
+                      }`}>
+                        {g.total_points > 0 ? (
+                          <span className="flex items-center gap-0.5 justify-end">
+                            <Star className="w-3 h-3 fill-current" />
+                            {g.total_points}
+                          </span>
+                        ) : "—"}
+                      </span>
+                    )}
+
+                    <span className="text-sm tabular-nums text-muted-foreground shrink-0 text-right">
                       {formatElapsed(g.elapsed_ms)}
                     </span>
                   </div>
                 );
               })}
             </div>
+
+            {hasPointsData && (
+              <p className="text-[10px] text-muted-foreground text-center pt-1">
+                Ranked by score · time used as tiebreaker
+              </p>
+            )}
           </div>
         )}
       </div>
