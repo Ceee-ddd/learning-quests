@@ -421,10 +421,12 @@ export default function Play() {
     if (c.type === "multiple_choice") {
       const mcQs = getMCQuestions(c);
       if (mcQs.length > 0) {
-        // All assigned questions must be answered correctly
+        // All assigned questions must be answered correctly.
+        // Skip stale indices (no longer present in the pool) instead of
+        // counting them as an automatic wrong answer.
         return assignedQuestionIndices.every((idx) => {
           const q = mcQs[idx];
-          if (!q) return false;
+          if (!q) return true;
           const chosen = mcAnswers[idx];
           if (!chosen) return false;
           const match = q.choices.find((ch) => ch.label.startsWith(chosen));
@@ -440,10 +442,12 @@ export default function Play() {
     if (c.type === "short_answer" || c.type === "long_text") {
       const saQs = getSAQuestions(c);
       if (saQs.length > 0) {
-        // All assigned questions must be answered
+        // All assigned questions must be answered.
+        // Skip stale indices (no longer present in the pool) instead of
+        // counting them as an automatic wrong answer.
         return assignedQuestionIndices.every((idx) => {
           const q = saQs[idx];
-          if (!q) return false;
+          if (!q) return true;
           const a = (saAnswers[idx] || "").trim().toLowerCase();
           if (q.keywords.length === 0) return a.length > 5;
           return q.keywords.some((k: string) => a.includes(k.toLowerCase()));
@@ -467,14 +471,19 @@ export default function Play() {
     const isMultiMC = mcQs.length > 0;
     const isMultiSA = saQs.length > 0;
 
-    // Guard: all assigned questions must have an answer before submitting
+    // Guard: all assigned questions must have an answer before submitting.
+    // Only count indices that actually resolve to a real question in the current
+    // pool — a stale index (e.g. the teacher edited the pool after this group was
+    // assigned) is never rendered, so it must never be required either.
     if (isMultiMC) {
-      const missing = assignedQuestionIndices.filter((idx) => !mcAnswers[idx]);
-      if (missing.length > 0) return toast.error(`Please answer all ${assignedQuestionIndices.length} question${assignedQuestionIndices.length !== 1 ? "s" : ""} before submitting.`);
+      const validIndices = assignedQuestionIndices.filter((idx) => !!mcQs[idx]);
+      const missing = validIndices.filter((idx) => !mcAnswers[idx]);
+      if (missing.length > 0) return toast.error(`Please answer all ${validIndices.length} question${validIndices.length !== 1 ? "s" : ""} before submitting.`);
     }
     if (isMultiSA) {
-      const missing = assignedQuestionIndices.filter((idx) => !(saAnswers[idx] || "").trim());
-      if (missing.length > 0) return toast.error(`Please answer all ${assignedQuestionIndices.length} question${assignedQuestionIndices.length !== 1 ? "s" : ""} before submitting.`);
+      const validIndices = assignedQuestionIndices.filter((idx) => !!saQs[idx]);
+      const missing = validIndices.filter((idx) => !(saAnswers[idx] || "").trim());
+      if (missing.length > 0) return toast.error(`Please answer all ${validIndices.length} question${validIndices.length !== 1 ? "s" : ""} before submitting.`);
     }
 
     // Legacy flat MC / sequence / short-answer: need a non-empty text input
