@@ -546,7 +546,26 @@ export default function TeacherSession() {
                   className="text-xs rounded-lg border border-border bg-background px-2 py-1.5 text-foreground focus:outline-none focus:border-action transition disabled:opacity-50"
                   value={activeChallenge.type}
                   disabled={sessionLocked}
-                  onChange={(e) => updateChallenge(activeChallenge.id, { type: e.target.value })}
+                  onChange={(e) => {
+                    const newType = e.target.value;
+                    const oldType = activeChallenge.type;
+                    // Types share a pool shape in these groups:
+                    //  - sequence / final_riddle: both use `options` as {variants, display_count}
+                    //  - short_answer / long_text: both use `keywords` as {questions, display_count}
+                    // Switching within a group keeps the existing pool intact.
+                    // Switching to a different group wipes both pool fields so
+                    // leftover data from the old type doesn't linger unseen and
+                    // silently trip up submission later (it can create an
+                    // unanswerable requirement on the Play page).
+                    const poolGroup = (t: string) =>
+                      t === "sequence" || t === "final_riddle" ? "seq" :
+                      t === "short_answer" || t === "long_text" ? "sa" :
+                      t; // "multiple_choice" is its own group
+                    const sameGroup = poolGroup(oldType) === poolGroup(newType);
+                    updateChallenge(activeChallenge.id, sameGroup
+                      ? { type: newType }
+                      : { type: newType, options: null, keywords: null });
+                  }}
                 >
                   <option value="sequence">Sequence (code)</option>
                   <option value="multiple_choice">Multiple Choice</option>

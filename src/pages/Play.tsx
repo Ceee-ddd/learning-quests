@@ -466,8 +466,13 @@ export default function Play() {
     if (sessionStatus !== "active") return toast.error("The session has ended.");
     if (onCooldown) return;
 
-    const mcQs = getMCQuestions(challenge);
-    const saQs = getSAQuestions(challenge);
+    // Only look at the question pool that actually matches this compartment's
+    // type. A compartment can have leftover/unused data sitting in the other
+    // field (e.g. `keywords` still holding an old short-answer pool on a
+    // compartment that's now `multiple_choice`) — that data is never shown to
+    // the player, so it must never be required either.
+    const mcQs = challenge.type === "multiple_choice" ? getMCQuestions(challenge) : [];
+    const saQs = (challenge.type === "short_answer" || challenge.type === "long_text") ? getSAQuestions(challenge) : [];
     const isMultiMC = mcQs.length > 0;
     const isMultiSA = saQs.length > 0;
 
