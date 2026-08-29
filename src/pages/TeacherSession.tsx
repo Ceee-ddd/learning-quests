@@ -140,7 +140,19 @@ export default function TeacherSession() {
     setDirtyPages((prev) => new Set(prev).add(id));
   }
 
+  // Once a session has started, question_assignments have already been randomly
+  // generated per group per compartment (indices into each compartment's pool).
+  // Editing the pool afterward (options/keywords/type) desyncs those stored
+  // indices from the live content, which can permanently soft-lock groups.
+  // So the pool is locked as soon as the session goes live.
+  const sessionLocked = !!session?.started_at;
+
   function updateChallenge(id: string, patch: Record<string, any>) {
+    const touchesPool = "options" in patch || "keywords" in patch || "type" in patch;
+    if (sessionLocked && touchesPool) {
+      toast.error("This session is live — question pools are locked so they stay in sync with what's already been assigned to groups.");
+      return;
+    }
     setChallenges((arr) => arr.map((x) => x.id === id ? { ...x, ...patch } : x));
     markDirty(id);
   }
@@ -183,6 +195,7 @@ export default function TeacherSession() {
 
   async function addCompartment() {
     if (!sessionId) return;
+    if (sessionLocked) { toast.error("This session is live — compartments are locked so they stay in sync with what's already been assigned to groups."); return; }
     setAddingCompartment(true);
     const nextLevel = challenges.length > 0 ? Math.max(...challenges.map((c) => c.level)) + 1 : 1;
     const template = defaultChallenge(sessionId, nextLevel);
@@ -205,6 +218,7 @@ export default function TeacherSession() {
 
   // Trigger removal confirmation modal
   function removeCompartment(c: any) {
+    if (sessionLocked) { toast.error("This session is live — compartments are locked so they stay in sync with what's already been assigned to groups."); return; }
     if (challenges.length <= 1) { toast.error("You need at least one compartment."); return; }
     setRemoveTarget(c);
     setShowRemoveConfirm(true);
@@ -387,8 +401,8 @@ export default function TeacherSession() {
               {/* Remove button (opens confirm modal) */}
               <button
                 onClick={() => activeChallenge && removeCompartment(activeChallenge)}
-                disabled={removingCompartment || totalCompartments <= 1}
-                title="Remove this compartment"
+                disabled={removingCompartment || totalCompartments <= 1 || sessionLocked}
+                title={sessionLocked ? "Locked — session is live" : "Remove this compartment"}
                 className="w-8 h-8 flex items-center justify-center rounded-lg border-2 border-destructive/40 text-destructive hover:bg-destructive/10 transition disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <Trash2 className="w-4 h-4" />
@@ -396,8 +410,8 @@ export default function TeacherSession() {
               {/* Add button (opens confirm modal) */}
               <button
                 onClick={() => setShowAddConfirm(true)}
-                disabled={addingCompartment}
-                title="Add compartment"
+                disabled={addingCompartment || sessionLocked}
+                title={sessionLocked ? "Locked — session is live" : "Add compartment"}
                 className="w-8 h-8 flex items-center justify-center rounded-lg border-2 border-action/50 text-action hover:bg-action/10 transition disabled:opacity-50"
               >
                 <Plus className="w-4 h-4" />
@@ -529,8 +543,9 @@ export default function TeacherSession() {
                   Compartment {activeChallenge.level}
                 </div>
                 <select
-                  className="text-xs rounded-lg border border-border bg-background px-2 py-1.5 text-foreground focus:outline-none focus:border-action transition"
+                  className="text-xs rounded-lg border border-border bg-background px-2 py-1.5 text-foreground focus:outline-none focus:border-action transition disabled:opacity-50"
                   value={activeChallenge.type}
+                  disabled={sessionLocked}
                   onChange={(e) => updateChallenge(activeChallenge.id, { type: e.target.value })}
                 >
                   <option value="sequence">Sequence (code)</option>
@@ -541,6 +556,11 @@ export default function TeacherSession() {
                 </select>
               </div>
 
+              {sessionLocked && (
+                <div className="rounded-xl bg-amber-400/10 border border-amber-400/30 px-3 py-2.5 text-xs text-amber-700 leading-relaxed">
+                  This session is live — question pools, question count, and compartment type are locked so they stay in sync with what's already been randomly assigned to groups. Compartment code, reveal message, and time limit can still be edited.
+                </div>
+              )}
 
 
               {/* Sequence / Riddle multi-variant pool editor */}
@@ -590,7 +610,7 @@ export default function TeacherSession() {
                 const typeLabel = activeChallenge.type === "final_riddle" ? "Riddle" : "Sequence";
 
                 return (
-                  <div className="space-y-3">
+                  <fieldset disabled={sessionLocked} className="space-y-3 disabled:opacity-60">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-primary">
                         {typeLabel} Pool
@@ -670,7 +690,7 @@ export default function TeacherSession() {
                     >
                       <Plus className="w-3 h-3" /> Add {typeLabel}
                     </button>
-                  </div>
+                  </fieldset>
                 );
               })()}
 
@@ -720,7 +740,7 @@ export default function TeacherSession() {
                 }
 
                 return (
-                  <div className="space-y-3">
+                  <fieldset disabled={sessionLocked} className="space-y-3 disabled:opacity-60">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-primary">
                         Questions
@@ -797,7 +817,7 @@ export default function TeacherSession() {
                     >
                       <Plus className="w-3 h-3" /> Add Question
                     </button>
-                  </div>
+                  </fieldset>
                 );
               })()}
 
@@ -887,7 +907,7 @@ export default function TeacherSession() {
                 }
 
                 return (
-                  <div className="space-y-3">
+                  <fieldset disabled={sessionLocked} className="space-y-3 disabled:opacity-60">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-primary">
                         Questions &amp; Choices
@@ -999,7 +1019,7 @@ export default function TeacherSession() {
                     >
                       <Plus className="w-3 h-3" /> Add Question
                     </button>
-                  </div>
+                  </fieldset>
                 );
               })()}
 
